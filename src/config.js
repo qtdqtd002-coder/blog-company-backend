@@ -27,6 +27,10 @@ const config = {
   basePath: normBase(process.env.BASE_PATH),
   corsOrigins: csv(process.env.CORS_ORIGINS),
 
+  // 관리자 토큰 — 상태 갱신/푸시 트리거 등 쓰기 권한 엔드포인트 보호용.
+  // 비어 있으면 해당 엔드포인트는 503(잠김). deploy.sh가 자동 발급.
+  adminToken: process.env.ADMIN_TOKEN || '',
+
   dataDir: path.join(__dirname, '..', 'data'),
 
   vapid: {

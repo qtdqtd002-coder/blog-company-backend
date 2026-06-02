@@ -62,7 +62,8 @@ function main() {
     console.log(`[server] health:  http://0.0.0.0:${config.port}${b}/health`);
     console.log(`[server] CORS:    ${config.corsOrigins.length ? config.corsOrigins.join(', ') : '(all)'}`);
     console.log(`[server] push:    ${push.isEnabled() ? 'enabled' : 'disabled(VAPID 미설정)'}`);
-    console.log(`[server] agent:   ${config.agent.live ? 'live-key' : 'stub'}`);
+    console.log(`[server] admin:   ${config.adminToken ? 'token 설정됨' : 'MISSING(상태/푸시 엔드포인트 잠김 — ADMIN_TOKEN 설정 필요)'}`);
+    console.log(`[server] mode:    queue (작성·발행은 외부 러너가 처리)`);
     console.log('============================================');
   });
 

@@ -17,10 +17,21 @@ GCP **e2-micro** 우분투 VM(1GB RAM)에 배포하는 가벼운 백엔드.
 | `GET {base}/requests` 요청 목록/상태 | ✅ 동작 |
 | `GET {base}/health` 헬스체크 | ✅ 동작 |
 | `POST {base}/push/subscribe` 구독 저장 + 발행완료 푸시 발송 함수 | ✅ 동작(VAPID 키 설정 시) |
-| 에이전트 러너(생성→발행) | 🟡 **stub** (2b 자리표시, 인터페이스만 확정) |
-| 2시간 주기 스케줄러 | 🟡 골격(`AUTO_GEN_ENABLED=false` 기본, stub 호출) |
+| `GET {base}/requests?status=received` 큐 조회(러너용) | ✅ 동작 |
+| `POST {base}/requests/:id/status` 상태 갱신(관리자) → published 시 푸시 | ✅ 동작(ADMIN_TOKEN 필요) |
+| `POST {base}/push/test` 테스트 푸시(관리자) | ✅ 동작(ADMIN_TOKEN 필요) |
 
 `{base}` = `PUBLISH_API_BASE_URL` (= 서버주소 + `BASE_PATH`). PWA `api.js` 와 동일 계약.
+
+### 2b 아키텍처(Option 2) — VM은 "큐", 작성·발행은 외부 러너
+VM 백엔드는 **요청을 받아 큐에 저장(`received`)** 하고 24시간 떠 있는다.
+실제 **글 작성·QA·깃 발행**은 PC의 Claude Code 예약 러너(`blog-request-runner` 스킬)가:
+1. `GET {base}/requests?status=received` 로 대기 요청을 가져오고,
+2. 기존 `game-blog-publish` 파이프라인(작성→QA→깃 push)으로 처리한 뒤,
+3. `POST {base}/requests/:id/status` (헤더 `X-Admin-Token: <ADMIN_TOKEN>`)로 상태를 갱신한다.
+   `status:"published"` 로 갱신되면 VM이 구독자에게 **발행 완료 웹푸시**를 보낸다.
+
+상태 흐름: `received` → (러너가) `processing` → `published` | `failed` | `skipped`.
 
 ### 요청 본문 계약 (PWA `api.js` 와 일치)
 ```json
