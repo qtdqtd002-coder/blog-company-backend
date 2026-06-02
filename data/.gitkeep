@@ -1,0 +1,2 @@
+# 런타임 데이터 디렉터리. requests.json / subscriptions.json 이 여기 생성된다.
+# 실제 데이터 파일은 .gitignore 로 제외됨 (서버 로컬에만 존재).

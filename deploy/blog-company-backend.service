@@ -1,0 +1,30 @@
+# systemd 유닛 — PM2 대신 systemd 로 상시 구동할 때 사용.
+# 설치:
+#   sudo cp deploy/blog-company-backend.service /etc/systemd/system/
+#   (아래 User/WorkingDirectory/ExecStart 경로를 실제 환경에 맞게 수정)
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now blog-company-backend
+#   sudo systemctl status blog-company-backend
+#   journalctl -u blog-company-backend -f      # 로그
+
+[Unit]
+Description=Blog Company Backend (PWA API + Web Push)
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/blog-company-backend
+# node 절대경로(설치 방식에 따라 다름): `which node` 로 확인 후 수정
+ExecStart=/usr/bin/node src/server.js
+Restart=always
+RestartSec=3
+# .env 를 dotenv 가 로드하므로 EnvironmentFile 불필요.
+# 메모리 보호(e2-micro)
+MemoryMax=350M
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=bc-backend
+
+[Install]
+WantedBy=multi-user.target

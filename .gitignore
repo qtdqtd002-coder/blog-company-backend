@@ -1,0 +1,20 @@
+# 의존성
+node_modules/
+
+# 비밀: 실제 키는 절대 커밋하지 않는다
+.env
+.env.local
+*.pem
+
+# 런타임 데이터(요청/구독 저장소) — 서버 로컬에만 존재
+data/*.json
+!data/.gitkeep
+
+# 로그
+*.log
+npm-debug.log*
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
