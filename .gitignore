@@ -6,6 +6,9 @@ node_modules/
 .env.local
 *.pem
 
+# 작성 러너(PC) 설정 — ADMIN_TOKEN 포함, 절대 커밋 금지
+.runner.config.json
+
 # 런타임 데이터(요청/구독 저장소) — 서버 로컬에만 존재
 data/*.json
 !data/.gitkeep

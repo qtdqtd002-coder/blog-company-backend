@@ -1,0 +1,7 @@
+{
+  "_comment": "작성 러너(blog-request-runner 스킬)가 읽는 설정. 이 파일을 '.runner.config.json' 으로 복사하고 값을 채우세요. .runner.config.json 은 gitignore 됩니다(ADMIN_TOKEN 비밀).",
+  "baseUrl": "https://34.139.184.70.sslip.io",
+  "adminToken": "<VM deploy.sh 가 출력한 ADMIN_TOKEN 을 여기에>",
+  "maxPerRun": 2,
+  "defaultWriter": "봄딩"
+}
