@@ -32,6 +32,14 @@ const config = {
   adminToken: process.env.ADMIN_TOKEN || '',
 
   dataDir: path.join(__dirname, '..', 'data'),
+  uploadDir: path.join(__dirname, '..', 'data', 'uploads'),
+
+  // 새 글 요청 첨부(외주 1회용 참고문서) 제한
+  attachment: {
+    maxBytes: parseInt(process.env.ATTACH_MAX_BYTES || String(10 * 1024 * 1024), 10), // 기본 10MB
+    // 허용 확장자(소문자, 점 없이). hwp(구포맷)는 서버 추출이 까다로워 1차 제외 — hwpx는 허용.
+    allowedExt: ['docx', 'xlsx', 'pdf', 'txt', 'hwpx'],
+  },
 
   vapid: {
     publicKey: process.env.VAPID_PUBLIC_KEY || '',

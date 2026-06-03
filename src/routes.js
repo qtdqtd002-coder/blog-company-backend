@@ -2,11 +2,16 @@
 /* API 라우트 — PWA app/api.js 의 BC_CONFIG 계약과 1:1 일치.
    계약:
      POST {base}/requests        body={topic, material, writer}  → 201 {id, status}
-     GET  {base}/requests        → 200 [{id, topic, material, writer, status, createdAt, ...}]
+                                 (또는 multipart/form-data: 동일 필드 + attachment=파일 1개)
+     GET  {base}/requests        → 200 [{id, topic, material, writer, status, createdAt, attachment?, ...}]
+     GET  {base}/requests/:id/attachment  (관리자) → 첨부 파일 다운로드(작성 러너용, 1회용)
      GET  {base}/health          → 200 {ok, ...}
      POST {base}/push/subscribe  body=PushSubscription(JSON)      → 201 {ok}
    (추가) POST {base}/push/test  → 구독자에게 테스트 푸시(운영 확인용)              */
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const multer = require('multer');
 const config = require('./config');
 const push = require('./push');
 const runner = require('./agent/runner');
@@ -15,6 +20,51 @@ function genId(prefix) {
   // 시간순 정렬 가능한 짧은 ID (crypto 난수 6바이트)
   const rnd = require('crypto').randomBytes(6).toString('hex');
   return `${prefix}_${Date.now().toString(36)}_${rnd}`;
+}
+
+// 확장자만 소문자로 추출(점 제외).
+function extOf(name) {
+  return path.extname(String(name || '')).slice(1).toLowerCase();
+}
+// multer 의 originalname 은 latin1 로 디코드되어 한글이 깨진다 → utf8 로 복원.
+function fixName(name) {
+  try { return Buffer.from(String(name || ''), 'latin1').toString('utf8'); } catch (_) { return String(name || ''); }
+}
+
+// ---- 첨부(외주 1회용 참고문서) 업로드 설정 ----
+fs.mkdirSync(config.uploadDir, { recursive: true });
+const uploadStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, config.uploadDir),
+  // 저장명은 우리가 생성(사용자 입력 미사용 → 경로조작 불가). 확장자만 유지.
+  filename: (req, file, cb) => { const e = extOf(file.originalname); cb(null, genId('att') + (e ? '.' + e : '')); },
+});
+function attachFilter(req, file, cb) {
+  const e = extOf(file.originalname);
+  if (!config.attachment.allowedExt.includes(e)) {
+    const err = new Error('허용되지 않은 첨부 형식: .' + (e || '?') + ' (허용: ' + config.attachment.allowedExt.join(', ') + ')');
+    err.code = 'ATTACH_TYPE';
+    return cb(err);
+  }
+  cb(null, true);
+}
+const uploader = multer({ storage: uploadStorage, fileFilter: attachFilter, limits: { fileSize: config.attachment.maxBytes, files: 1 } });
+// multipart 가 아니면 통과, multipart 면 'attachment' 1개 파싱. 에러는 400 으로 정규화.
+function attachmentUpload(req, res, next) {
+  uploader.single('attachment')(req, res, (err) => {
+    if (err) {
+      const msg = err.code === 'LIMIT_FILE_SIZE'
+        ? '첨부가 너무 큽니다(최대 ' + Math.round(config.attachment.maxBytes / 1024 / 1024) + 'MB).'
+        : err.code === 'ATTACH_TYPE' ? err.message
+        : '첨부 처리 오류: ' + err.message;
+      return res.status(400).json({ error: msg });
+    }
+    next();
+  });
+}
+// 저장 파일 삭제(1회용 문서 정리). storedAs 는 basename 으로 한정.
+function deleteAttachmentFile(storedAs) {
+  if (!storedAs) return;
+  try { fs.unlinkSync(path.join(config.uploadDir, path.basename(String(storedAs)))); } catch (_) {}
 }
 
 function buildRouter(store) {
@@ -58,13 +108,14 @@ function buildRouter(store) {
     res.json(list);
   });
 
-  // ---- 발행 요청 수신 ----
-  r.post('/requests', async (req, res) => {
+  // ---- 발행 요청 수신 (JSON 또는 multipart[+첨부]) ----
+  r.post('/requests', attachmentUpload, async (req, res) => {
     const body = req.body || {};
     const topic = (body.topic || '').toString().trim();
     const material = (body.material || '').toString().trim();
     let writer = (body.writer || '').toString().trim();
     if (!topic) {
+      if (req.file) deleteAttachmentFile(req.file.filename); // 검증 실패 시 업로드 파일 정리
       return res.status(400).json({ error: 'topic(주제)은 필수입니다.' });
     }
     if (writer && !runner.WRITERS.includes(writer)) {
@@ -79,12 +130,26 @@ function buildRouter(store) {
       createdAt: Date.now(),
       source: (body.source || 'pwa').toString().slice(0, 32),
     };
+    // 첨부(외주 1회용 참고문서) — 메타만 기록, 파일은 uploads/ 에. 작성 러너가 받아 '이 글에만' 반영.
+    if (req.file) {
+      const name = fixName(req.file.originalname).slice(0, 200);
+      rec.attachment = { name, storedAs: req.file.filename, type: extOf(name), size: req.file.size };
+    }
     await store.requests.insert(rec);
 
     // 2b 설계(Option 2): VM 은 접수만 한다('received'로 큐잉).
     // 실제 작성·발행은 PC의 Claude Code 예약 러너가 GET /requests?status=received 로
     // 가져가 game-blog-publish 파이프라인으로 처리한 뒤, POST /requests/:id/status 로 상태를 갱신한다.
-    res.status(201).json({ id: rec.id, status: rec.status });
+    res.status(201).json({ id: rec.id, status: rec.status, attachment: rec.attachment ? rec.attachment.name : null });
+  });
+
+  // ---- 첨부 다운로드 (관리자: 작성 러너가 1회용 문서를 받아간다) ----
+  r.get('/requests/:id/attachment', requireAdmin, (req, res) => {
+    const rec = store.requests.find((x) => x.id === req.params.id);
+    if (!rec || !rec.attachment) return res.status(404).json({ error: '해당 요청에 첨부 없음' });
+    const fp = path.join(config.uploadDir, path.basename(rec.attachment.storedAs));
+    if (!fs.existsSync(fp)) return res.status(410).json({ error: '첨부가 이미 삭제됨(1회용 — 발행/실패 처리 후 정리됨).' });
+    res.download(fp, rec.attachment.name);
   });
 
   // ---- 요청 상태 갱신 (관리자: 작성 러너가 호출) ----
@@ -103,6 +168,15 @@ function buildRouter(store) {
     if (body.publishUrl != null) patch.publishUrl = String(body.publishUrl).slice(0, 500);
     if (body.postRel != null) patch.postRel = String(body.postRel).slice(0, 500);
     if (body.error != null) patch.error = String(body.error).slice(0, 1000);
+
+    // 1회용 첨부 정리: 종료 상태가 되면 업로드 파일을 삭제(문서는 해당 글에만 쓰이고 폐기).
+    if (['published', 'failed', 'skipped'].includes(status)) {
+      const cur = store.requests.find((x) => x.id === id);
+      if (cur && cur.attachment && cur.attachment.storedAs && !cur.attachmentDeletedAt) {
+        deleteAttachmentFile(cur.attachment.storedAs);
+        patch.attachmentDeletedAt = Date.now();
+      }
+    }
 
     const updated = await store.requests.update(id, patch);
     if (!updated) return res.status(404).json({ error: '해당 id 요청 없음' });

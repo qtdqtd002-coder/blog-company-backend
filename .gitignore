@@ -13,6 +13,9 @@ node_modules/
 data/*.json
 !data/.gitkeep
 
+# 업로드된 1회용 참고문서(외주 첨부) — 처리 후 삭제, 절대 커밋 금지
+data/uploads/
+
 # 로그
 *.log
 npm-debug.log*

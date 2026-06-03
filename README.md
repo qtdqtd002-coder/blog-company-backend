@@ -1,7 +1,7 @@
-# 블로그 컴퍼니 백엔드 (2단계 · 2a)
+# 쓰담 백엔드 (2단계 · 2a)
 
 GCP **e2-micro** 우분투 VM(1GB RAM)에 배포하는 가벼운 백엔드.
-블로그 컴퍼니 **PWA**(`BlogPreview/app/api.js` 의 `BC_CONFIG` 계약)와 연동되고,
+쓰담 **PWA**(`BlogPreview/app/api.js` 의 `BC_CONFIG` 계약)와 연동되고,
 글 발행 완료 시 **웹 푸시(VAPID)** 를 보낸다.
 
 > 헤드리스 브라우저 의존성 없음. 의존성 5개(express, cors, dotenv, web-push, node-cron) — 모두 순수 JS(네이티브 빌드 불필요).
@@ -13,8 +13,9 @@ GCP **e2-micro** 우분투 VM(1GB RAM)에 배포하는 가벼운 백엔드.
 
 | 기능 | 상태 |
 |---|---|
-| `POST {base}/requests` 새 글 요청 수신 → 저장 → `{id}` 반환 | ✅ 동작 |
+| `POST {base}/requests` 새 글 요청 수신 → 저장 → `{id}` 반환 (JSON 또는 multipart+첨부) | ✅ 동작 |
 | `GET {base}/requests` 요청 목록/상태 | ✅ 동작 |
+| `GET {base}/requests/:id/attachment` 첨부 다운로드(관리자, 작성 러너용·1회용) | ✅ 동작(ADMIN_TOKEN 필요) |
 | `GET {base}/health` 헬스체크 | ✅ 동작 |
 | `POST {base}/push/subscribe` 구독 저장 + 발행완료 푸시 발송 함수 | ✅ 동작(VAPID 키 설정 시) |
 | `GET {base}/requests?status=received` 큐 조회(러너용) | ✅ 동작 |
@@ -33,12 +34,17 @@ VM 백엔드는 **요청을 받아 큐에 저장(`received`)** 하고 24시간 �
 
 상태 흐름: `received` → (러너가) `processing` → `published` | `failed` | `skipped`.
 
-### 요청 본문 계약 (PWA `api.js` 와 일치)
+### 요청 본문 계약 (사이트 index.html / PWA `api.js` / 안드로이드와 일치)
 ```json
-POST {base}/requests
-{ "topic": "주제(필수)", "material": "소재(선택)", "writer": "봄딩|영도|겜더쿠|null" }
-→ 201 { "id": "req_...", "status": "received" }
+POST {base}/requests        (Content-Type: application/json)
+{ "topic": "주제(필수)", "material": "소재(선택)", "writer": "봄딩|영도|겜더쿠|null", "source": "site|pwa|android" }
+→ 201 { "id": "req_...", "status": "received", "attachment": null }
 ```
+첨부(외주 1회용 참고문서)가 있으면 **multipart/form-data** 로 전송: 같은 텍스트 필드 + `attachment`(파일 1개).
+- 허용: `docx, xlsx, pdf, txt, hwpx` · 최대 10MB(`ATTACH_MAX_BYTES`). 파일은 `data/uploads/` 에 저장.
+- 작성 러너가 `GET {base}/requests/:id/attachment`(관리자)로 받아 **그 글에만** 반영하고, 발행/실패 처리 시 서버가 원본을 자동 삭제(1회용).
+
+> ⚠ **재배포 주의**: 첨부 기능은 `multer` 의존성을 추가했다. VM에서 `deploy.sh` 재실행(= `git pull` + `npm install --omit=dev`)으로 설치된 뒤 pm2 reload 되어야 동작한다.
 
 ---
 
