@@ -37,9 +37,12 @@ VM 백엔드는 **요청을 받아 큐에 저장(`received`)** 하고 24시간 �
 ### 요청 본문 계약 (사이트 index.html / PWA `api.js` / 안드로이드와 일치)
 ```json
 POST {base}/requests        (Content-Type: application/json)
-{ "topic": "주제(필수)", "material": "소재(선택)", "writer": "봄딩|영도|겜더쿠|null", "source": "site|pwa|android" }
-→ 201 { "id": "req_...", "status": "received", "attachment": null }
+{ "topic": "주제(필수)", "material": "소재(선택)", "writer": "봄딩|영도|겜더쿠|null",
+  "purpose": "사전예약|출시·첫인상|업데이트·패치|게임 정보|게임 공략|쿠폰·이벤트|티어·추천|제품 비교·추천|사용 후기·리뷰|기타",
+  "source": "site|pwa|android" }
+→ 201 { "id": "req_...", "status": "received", "purpose": "게임 정보", "attachment": null }
 ```
+> `purpose`(글의 목적)는 PWA/사이트가 **필수 선택**해 보낸다. 정본 라벨(위 10종, `shared/blog-writing/post-purpose-guide.md`)이 아니면 서버가 `기타`로 정규화하고, 빈 값(옛 클라이언트)은 `null`로 저장한다. 작성 러너가 이 값으로 **목적별 최소 정보 가이드**를 적용한다.
 첨부(외주 1회용 참고문서)가 있으면 **multipart/form-data** 로 전송: 같은 텍스트 필드 + `attachment`(파일 1개).
 - 허용: `docx, xlsx, pdf, txt, hwpx` · 최대 10MB(`ATTACH_MAX_BYTES`). 파일은 `data/uploads/` 에 저장.
 - 작성 러너가 `GET {base}/requests/:id/attachment`(관리자)로 받아 **그 글에만** 반영하고, 발행/실패 처리 시 서버가 원본을 자동 삭제(1회용).
@@ -142,6 +145,16 @@ sudo systemctl enable --now blog-company-backend
 sudo systemctl status blog-company-backend
 journalctl -u blog-company-backend -f
 ```
+
+### ③-1 재배포 (코드 갱신 시 — 한 줄)
+최초 구동(③)을 한 번 해 둔 뒤로는, 코드가 바뀔 때마다 VM에서 **한 줄**이면 된다:
+```bash
+cd ~/blog-company-backend && ./deploy.sh
+```
+`deploy.sh` 가 자동으로: **git pull → `npm install --omit=dev`(신규 의존성 설치) → `.env` 없으면 생성 → `ADMIN_TOKEN` 비어 있으면 발급(있으면 보존) → pm2/systemd 중 구동 중인 쪽으로 재시작 → 헬스체크 → ADMIN_TOKEN 출력**(PC 러너 `.runner.config.json` 에 넣을 값).
+- 최초 1회만 실행 권한: `chmod +x deploy.sh`.
+- `purpose`(글의 목적) 필드 추가분도 이 한 줄로 반영된다(코드 변경이라 의존성 추가는 없음).
+- ⚠ VAPID 키는 PWA 공개키와 짝이라 자동 생성하지 않는다 — 없으면 경고만 출력하고, 필요 시 `npm run gen:vapid` 후 `.env` + PWA `api.js` 를 함께 갱신한다.
 
 ### ④ 방화벽 / 포트
 - 기본 포트 **8080**. GCP **VPC 방화벽 규칙**에서 해당 포트(tcp:8080) 인그레스 허용 + VM 에 네트워크 태그 매칭.

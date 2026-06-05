@@ -14,6 +14,14 @@ const config = require('../config');
 
 const WRITERS = ['봄딩', '영도', '겜더쿠'];
 
+// ★글의 목적(purpose) — 정본 shared/blog-writing/post-purpose-guide.md 의 라벨과 1:1.
+// PWA/사이트 요청이 필수로 보내는 값. 알 수 없는 값은 '기타'로 정규화한다(거부하지 않음).
+const PURPOSES = [
+  '사전예약', '출시·첫인상', '업데이트·패치', '게임 정보', '게임 공략',
+  '쿠폰·이벤트', '티어·추천', '제품 비교·추천', '사용 후기·리뷰', '기타',
+];
+const DEFAULT_PURPOSE = '기타';
+
 /* ---- 1) 글 생성 ----------------------------------------------------------
    입력:  request = { id, topic, material, writer, ... }
    출력:  post    = { title, html, writer, category, slug, meta:{...} }       */
@@ -97,4 +105,4 @@ function escapeHtml(s) {
   ));
 }
 
-module.exports = { processRequest, generatePost, publishPost, autoGenerate, WRITERS };
+module.exports = { processRequest, generatePost, publishPost, autoGenerate, WRITERS, PURPOSES, DEFAULT_PURPOSE };

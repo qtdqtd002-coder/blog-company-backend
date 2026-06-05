@@ -1,9 +1,10 @@
 'use strict';
 /* API 라우트 — PWA app/api.js 의 BC_CONFIG 계약과 1:1 일치.
    계약:
-     POST {base}/requests        body={topic, material, writer}  → 201 {id, status}
+     POST {base}/requests        body={topic, material, writer, purpose}  → 201 {id, status, purpose}
                                  (또는 multipart/form-data: 동일 필드 + attachment=파일 1개)
-     GET  {base}/requests        → 200 [{id, topic, material, writer, status, createdAt, attachment?, ...}]
+                                 purpose=글의 목적(post-purpose-guide.md 라벨). 알 수 없으면 '기타'로 정규화.
+     GET  {base}/requests        → 200 [{id, topic, material, writer, purpose, status, createdAt, attachment?, ...}]
      GET  {base}/requests/:id/attachment  (관리자) → 첨부 파일 다운로드(작성 러너용, 1회용)
      GET  {base}/health          → 200 {ok, ...}
      POST {base}/push/subscribe  body=PushSubscription(JSON)      → 201 {ok}
@@ -114,6 +115,7 @@ function buildRouter(store) {
     const topic = (body.topic || '').toString().trim();
     const material = (body.material || '').toString().trim();
     let writer = (body.writer || '').toString().trim();
+    let purpose = (body.purpose || '').toString().trim();
     if (!topic) {
       if (req.file) deleteAttachmentFile(req.file.filename); // 검증 실패 시 업로드 파일 정리
       return res.status(400).json({ error: 'topic(주제)은 필수입니다.' });
@@ -121,11 +123,16 @@ function buildRouter(store) {
     if (writer && !runner.WRITERS.includes(writer)) {
       writer = ''; // 알 수 없는 작성자는 미지정 처리(거부하지 않음)
     }
+    // 글의 목적: 정본 라벨이 아니면 '기타'로 정규화(거부하지 않음). 빈 값(옛 클라이언트)은 null.
+    if (purpose && !runner.PURPOSES.includes(purpose)) {
+      purpose = runner.DEFAULT_PURPOSE;
+    }
     const rec = {
       id: genId('req'),
       topic,
       material,
       writer: writer || null,
+      purpose: purpose || null,
       status: 'received',
       createdAt: Date.now(),
       source: (body.source || 'pwa').toString().slice(0, 32),
@@ -140,7 +147,7 @@ function buildRouter(store) {
     // 2b 설계(Option 2): VM 은 접수만 한다('received'로 큐잉).
     // 실제 작성·발행은 PC의 Claude Code 예약 러너가 GET /requests?status=received 로
     // 가져가 game-blog-publish 파이프라인으로 처리한 뒤, POST /requests/:id/status 로 상태를 갱신한다.
-    res.status(201).json({ id: rec.id, status: rec.status, attachment: rec.attachment ? rec.attachment.name : null });
+    res.status(201).json({ id: rec.id, status: rec.status, purpose: rec.purpose, attachment: rec.attachment ? rec.attachment.name : null });
   });
 
   // ---- 첨부 다운로드 (관리자: 작성 러너가 1회용 문서를 받아간다) ----
