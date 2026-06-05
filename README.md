@@ -20,6 +20,7 @@ GCP **e2-micro** 우분투 VM(1GB RAM)에 배포하는 가벼운 백엔드.
 | `POST {base}/push/subscribe` 구독 저장 + 발행완료 푸시 발송 함수 | ✅ 동작(VAPID 키 설정 시) |
 | `GET {base}/requests?status=received` 큐 조회(러너용) | ✅ 동작 |
 | `POST {base}/requests/:id/status` 상태 갱신(관리자) → published 시 푸시 | ✅ 동작(ADMIN_TOKEN 필요) |
+| `POST {base}/requests/reclaim` stale `processing` 즉시 회수(관리자) | ✅ 동작(ADMIN_TOKEN 필요) |
 | `POST {base}/push/test` 테스트 푸시(관리자) | ✅ 동작(ADMIN_TOKEN 필요) |
 
 `{base}` = `PUBLISH_API_BASE_URL` (= 서버주소 + `BASE_PATH`). PWA `api.js` 와 동일 계약.
@@ -33,6 +34,8 @@ VM 백엔드는 **요청을 받아 큐에 저장(`received`)** 하고 24시간 �
    `status:"published"` 로 갱신되면 VM이 구독자에게 **발행 완료 웹푸시**를 보낸다.
 
 상태 흐름: `received` → (러너가) `processing` → `published` | `failed` | `skipped`.
+
+**고아(stale `processing`) 자동 회수**: 작성 러너(PC)가 처리 도중 중단(앱 종료·토큰 소진·세션 끊김·크래시)되면 요청이 `processing` 에 영구히 박혀 다시 안 잡히는 문제가 있었다. 이를 막기 위해 VM이 `RECLAIM_AFTER_MS`(기본 60분)보다 오래 `processing` 인 요청을 자동 복구한다 — 시도 `RECLAIM_MAX_ATTEMPTS`(기본 3) 미만이면 `received`(재시도), 이상이면 `failed`(종결+첨부 정리). node-cron 스윕(`RECLAIM_SWEEP_CRON`, 기본 10분)이 상시 수행하고, 러너도 회차 시작 때 `POST {base}/requests/reclaim` 로 즉시 트리거한다. `processing` 전환마다 `attempts` 가 +1 된다. `GET /health` 의 `counts.stuckProcessing` 으로 현재 고아 후보 수를 확인할 수 있다.
 
 ### 요청 본문 계약 (사이트 index.html / PWA `api.js` / 안드로이드와 일치)
 ```json

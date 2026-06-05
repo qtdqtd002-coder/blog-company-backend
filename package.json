@@ -1,8 +1,8 @@
 {
   "name": "blog-company-backend",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "블로그 컴퍼니 PWA 백엔드 (2단계 2a) — 발행요청 API + 웹푸시(VAPID) + 에이전트 러너/스케줄러 자리표시",
+  "description": "블로그 컴퍼니 PWA 백엔드 (2단계 2b/Option2) — 발행요청 큐 + 웹푸시(VAPID) + stale-processing 자동 회수",
   "type": "commonjs",
   "main": "src/server.js",
   "engines": {
@@ -12,7 +12,8 @@
     "start": "node src/server.js",
     "dev": "node --watch src/server.js",
     "gen:vapid": "node scripts/generate-vapid.js",
-    "smoke": "node scripts/smoke-test.js"
+    "smoke": "node scripts/smoke-test.js",
+    "test:reclaim": "node scripts/test-reclaim.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

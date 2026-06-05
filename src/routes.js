@@ -16,6 +16,7 @@ const multer = require('multer');
 const config = require('./config');
 const push = require('./push');
 const runner = require('./agent/runner');
+const reclaim = require('./reclaim');
 
 function genId(prefix) {
   // 시간순 정렬 가능한 짧은 ID (crypto 난수 6바이트)
@@ -86,6 +87,12 @@ function buildRouter(store) {
 
   // ---- 헬스체크 ----
   r.get('/health', (req, res) => {
+    const reqs = store.requests.all();
+    const now = Date.now();
+    // 임계시간 넘게 'processing' 인 요청 수(고아 후보) — 모니터링용.
+    const stuckProcessing = reqs.filter(
+      (x) => x.status === 'processing' && now - (x.statusAt || x.createdAt || 0) >= config.reclaim.afterMs
+    ).length;
     res.json({
       ok: true,
       service: 'blog-company-backend',
@@ -95,9 +102,12 @@ function buildRouter(store) {
       push: push.isEnabled(),
       adminConfigured: !!config.adminToken,
       counts: {
-        requests: store.requests.all().length,
+        requests: reqs.length,
         subscriptions: store.subscriptions.all().length,
+        processing: reqs.filter((x) => x.status === 'processing').length,
+        stuckProcessing,
       },
+      reclaim: { afterMs: config.reclaim.afterMs, maxAttempts: config.reclaim.maxAttempts, sweepCron: config.reclaim.sweepCron },
     });
   });
 
@@ -171,6 +181,11 @@ function buildRouter(store) {
       return res.status(400).json({ error: 'status 는 ' + VALID_STATUS.join('|') + ' 중 하나' });
     }
     const patch = { status, statusAt: Date.now() };
+    // 'processing' 전환마다 시도 횟수 +1 — 회수기(reclaim)가 무한 재시도를 막는 데 쓴다.
+    if (status === 'processing') {
+      const cur = store.requests.find((x) => x.id === id);
+      patch.attempts = ((cur && cur.attempts) || 0) + 1;
+    }
     if (body.title != null) patch.title = String(body.title).slice(0, 300);
     if (body.publishUrl != null) patch.publishUrl = String(body.publishUrl).slice(0, 500);
     if (body.postRel != null) patch.postRel = String(body.postRel).slice(0, 500);
@@ -198,6 +213,14 @@ function buildRouter(store) {
       });
     }
     res.json({ ok: true, request: updated, push: pushResult });
+  });
+
+  // ---- stale 'processing' 즉시 회수 (관리자: 러너가 회차 시작 때 호출) ----
+  // 백엔드 크론(기본 10분)과 동일한 로직을 수동으로 1회 트리거한다.
+  // 작성 러너가 중단돼 'processing' 에 박힌 요청을 received(재시도)/failed(종결)로 복구.
+  r.post('/requests/reclaim', requireAdmin, async (req, res) => {
+    const result = await reclaim.reclaimStale(store);
+    res.json({ ok: true, requeued: result.requeued, failed: result.failed, checked: result.checked });
   });
 
   // ---- 푸시 구독 저장 ----

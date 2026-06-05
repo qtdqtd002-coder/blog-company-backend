@@ -61,6 +61,18 @@ const config = {
     autoGenCron: process.env.AUTO_GEN_CRON || '0 */2 * * *',
     autoGenEnabled: bool(process.env.AUTO_GEN_ENABLED, false),
   },
+
+  // stale 'processing' 회수 — 작성 러너(PC)가 처리 중 중단되면 요청이 'processing'에
+  // 영구히 박혀 다시 안 잡히는 문제를 막는다. 임계시간 지난 processing 을 received(재시도)
+  // 또는 failed(반복 실패)로 자동 복구한다. 상시 동작(autoGen 과 무관).
+  reclaim: {
+    // 이 시간(ms) 넘게 'processing' 이면 회수 대상. 정상 파이프라인 최대 소요보다 넉넉히.
+    afterMs: parseInt(process.env.RECLAIM_AFTER_MS || String(60 * 60 * 1000), 10), // 기본 60분
+    // 이 횟수 이상 processing 시도(=회수) 되면 더 안 돌리고 failed 로 종결.
+    maxAttempts: parseInt(process.env.RECLAIM_MAX_ATTEMPTS || '3', 10),
+    // 회수 스윕 주기(cron). 기본 10분.
+    sweepCron: process.env.RECLAIM_SWEEP_CRON || '*/10 * * * *',
+  },
 };
 
 // 푸시 사용 가능 여부(키 둘 다 있어야 함)
