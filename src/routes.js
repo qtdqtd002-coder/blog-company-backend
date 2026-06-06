@@ -6,6 +6,9 @@
                                  purpose=글의 목적(post-purpose-guide.md 라벨). 알 수 없으면 '기타'로 정규화.
      GET  {base}/requests        → 200 [{id, topic, material, writer, purpose, status, createdAt, attachment?, ...}]
      GET  {base}/requests/:id/attachment  (관리자) → 첨부 파일 다운로드(작성 러너용, 1회용)
+     GET  {base}/hidden          → 200 {rels:[...]}                (숨김된 글 rel 목록 — 토큰 불필요)
+     POST {base}/hidden          body={rel, by?}   → 201 {ok, rels} (즉시 숨김 — 토큰 불필요)
+     POST {base}/hidden/unhide   body={rel}        → 200 {ok, rels} (숨김 해제 — 토큰 불필요)
      GET  {base}/health          → 200 {ok, ...}
      POST {base}/push/subscribe  body=PushSubscription(JSON)      → 201 {ok}
    (추가) POST {base}/push/test  → 구독자에게 테스트 푸시(운영 확인용)              */
@@ -158,6 +161,54 @@ function buildRouter(store) {
     // 실제 작성·발행은 PC의 Claude Code 예약 러너가 GET /requests?status=received 로
     // 가져가 game-blog-publish 파이프라인으로 처리한 뒤, POST /requests/:id/status 로 상태를 갱신한다.
     res.status(201).json({ id: rec.id, status: rec.status, purpose: rec.purpose, attachment: rec.attachment ? rec.attachment.name : null });
+  });
+
+  // ====================================================================
+  //  숨김(hide) — 글 rel 단위 소프트 숨김. admin 토큰 불필요(누구나 즉시 숨김/해제).
+  //  설계: 실제 파일·발행은 건드리지 않고 목록에서만 가린다(가역). 사이트·PWA가
+  //        GET /hidden 으로 목록을 받아 해당 rel 을 거른다. 깃 권한이 없는 사람도
+  //        모두에게 숨길 수 있게 하기 위함(삭제는 여전히 GitHub 토큰=관리자 전용).
+  //  안전: rel 은 문자열 키일 뿐(파일 경로로 사용 안 함) → 경로조작 위험 없음.
+  //        디스크 보호용으로 총 숨김 수에 상한을 둔다.
+  // ====================================================================
+  const HIDDEN_MAX = 5000;       // 저장 상한(악의적 폭주 시 디스크 보호)
+  function cleanRel(v) { return String(v == null ? '' : v).trim().slice(0, 500); }
+
+  // 현재 숨김 rel 목록(문자열 배열) — 사이트·PWA 가 로드 시 호출.
+  r.get('/hidden', (req, res) => {
+    const rels = store.hidden.all().map((x) => x.rel).filter(Boolean);
+    res.json({ rels });
+  });
+
+  // 숨김 추가(즉시) — body { rel, by? }. 이미 있으면 멱등(중복 추가 안 함).
+  r.post('/hidden', async (req, res) => {
+    const body = req.body || {};
+    const rel = cleanRel(body.rel);
+    if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    const exists = store.hidden.find((x) => x.rel === rel);
+    if (!exists) {
+      if (store.hidden.all().length >= HIDDEN_MAX) {
+        return res.status(429).json({ error: '숨김 목록이 한도에 도달했습니다.' });
+      }
+      await store.hidden.insert({
+        id: genId('hid'),
+        rel,
+        by: (body.by ? String(body.by).slice(0, 64) : null),
+        source: (body.source || 'web').toString().slice(0, 32),
+        hiddenAt: Date.now(),
+      });
+    }
+    const rels = store.hidden.all().map((x) => x.rel).filter(Boolean);
+    res.status(201).json({ ok: true, rel, already: !!exists, rels });
+  });
+
+  // 숨김 해제(즉시) — body { rel }. admin 토큰 불필요(누구나 해제 — 사용자 결정).
+  r.post('/hidden/unhide', async (req, res) => {
+    const rel = cleanRel((req.body || {}).rel);
+    if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    const removed = await store.hidden.removeBy((x) => x.rel === rel);
+    const rels = store.hidden.all().map((x) => x.rel).filter(Boolean);
+    res.json({ ok: true, rel, removed, rels });
   });
 
   // ---- 첨부 다운로드 (관리자: 작성 러너가 1회용 문서를 받아간다) ----

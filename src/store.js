@@ -77,6 +77,9 @@ function initStore(dataDir) {
   return {
     requests: createCollection(dataDir, 'requests'),
     subscriptions: createCollection(dataDir, 'subscriptions'),
+    // 숨김(hide) — 글 rel 단위 소프트 숨김 목록. admin 토큰 없이 누구나 추가/해제(즉시 반영, 가역).
+    // 실제 글 파일은 그대로 두고 사이트·PWA 목록에서만 가린다(깃 커밋·삭제 아님).
+    hidden: createCollection(dataDir, 'hidden'),
   };
 }
 
