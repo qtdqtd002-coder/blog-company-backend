@@ -9,6 +9,9 @@
      GET  {base}/hidden          → 200 {rels:[...]}                (숨김된 글 rel 목록 — 토큰 불필요)
      POST {base}/hidden          body={rel, by?}   → 201 {ok, rels} (즉시 숨김 — 토큰 불필요)
      POST {base}/hidden/unhide   body={rel}        → 200 {ok, rels} (숨김 해제 — 토큰 불필요)
+     GET  {base}/mpub            → 200 {rels:[...]}                (수동 발행완료 rel 목록 — 토큰 불필요)
+     POST {base}/mpub            body={rel, by?}   → 201 {ok, rels} (발행완료 표시 — 토큰 불필요)
+     POST {base}/mpub/unpub      body={rel}        → 200 {ok, rels} (발행완료 취소 — 토큰 불필요)
      GET  {base}/health          → 200 {ok, ...}
      POST {base}/push/subscribe  body=PushSubscription(JSON)      → 201 {ok}
    (추가) POST {base}/push/test  → 구독자에게 테스트 푸시(운영 확인용)              */
@@ -208,6 +211,50 @@ function buildRouter(store) {
     if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
     const removed = await store.hidden.removeBy((x) => x.rel === rel);
     const rels = store.hidden.all().map((x) => x.rel).filter(Boolean);
+    res.json({ ok: true, rel, removed, rels });
+  });
+
+  // ====================================================================
+  //  수동 발행완료(manual published) — 숨김과 동일 구조. admin 토큰 불필요(누구나 표시/취소).
+  //  자동검증 발행(깃 published.json)과 별개의 소프트 '발행됨' 플래그. 사이트·PWA가 union 한다.
+  //  삭제만 여전히 GitHub 토큰=관리자 전용(사용자 결정).
+  // ====================================================================
+  const MPUB_MAX = 5000;
+
+  // 현재 수동 발행완료 rel 목록 — 사이트·PWA 가 로드 시 호출.
+  r.get('/mpub', (req, res) => {
+    const rels = store.mpub.all().map((x) => x.rel).filter(Boolean);
+    res.json({ rels });
+  });
+
+  // 발행완료 표시(즉시) — body { rel, by? }. 이미 있으면 멱등.
+  r.post('/mpub', async (req, res) => {
+    const body = req.body || {};
+    const rel = cleanRel(body.rel);
+    if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    const exists = store.mpub.find((x) => x.rel === rel);
+    if (!exists) {
+      if (store.mpub.all().length >= MPUB_MAX) {
+        return res.status(429).json({ error: '발행완료 목록이 한도에 도달했습니다.' });
+      }
+      await store.mpub.insert({
+        id: genId('mpub'),
+        rel,
+        by: (body.by ? String(body.by).slice(0, 64) : null),
+        source: (body.source || 'web').toString().slice(0, 32),
+        markedAt: Date.now(),
+      });
+    }
+    const rels = store.mpub.all().map((x) => x.rel).filter(Boolean);
+    res.status(201).json({ ok: true, rel, already: !!exists, rels });
+  });
+
+  // 발행완료 취소(즉시) — body { rel }. admin 토큰 불필요(누구나 취소).
+  r.post('/mpub/unpub', async (req, res) => {
+    const rel = cleanRel((req.body || {}).rel);
+    if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    const removed = await store.mpub.removeBy((x) => x.rel === rel);
+    const rels = store.mpub.all().map((x) => x.rel).filter(Boolean);
     res.json({ ok: true, rel, removed, rels });
   });
 
