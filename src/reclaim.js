@@ -17,6 +17,7 @@
 const fs = require('fs');
 const path = require('path');
 const config = require('./config');
+const push = require('./push');
 
 // 1회용 첨부 파일 삭제(routes.js 와 동일 동작 — 종료 상태가 되면 정리).
 function deleteAttachmentFile(storedAs) {
@@ -55,6 +56,13 @@ async function reclaimStale(store, now) {
       }
       await store.requests.update(r.id, patch);
       result.failed.push({ id: r.id, attempts });
+      // 종결 실패도 요청자에게 알림(라우트의 failed 푸시와 동일 계약).
+      await push.broadcast(store, {
+        title: '요청하신 글을 발행하지 못했어요',
+        body: `"${r.topic || r.title || '요청'}" — ${patch.error}`.slice(0, 500),
+        url: './',
+        tag: 'bc-failed',
+      });
     } else {
       // 재시도 가능 → received 로 되돌림(첨부는 보존: 재시도에 그대로 쓰임).
       await store.requests.update(r.id, { status: 'received', statusAt: t, reclaimedAt: t });

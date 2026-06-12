@@ -309,6 +309,15 @@ function buildRouter(store) {
         url: updated.publishUrl || './',
         tag: 'bc-published',
       });
+    } else if (status === 'failed' || status === 'skipped') {
+      // 실패·스킵도 요청자에게 알린다 — 사유(error)가 유일한 피드백 채널이므로 본문에 싣는다.
+      const reason = updated.error ? ` — ${updated.error}` : '';
+      pushResult = await push.broadcast(store, {
+        title: '요청하신 글을 발행하지 못했어요',
+        body: `"${updated.topic || updated.title || '요청'}"${reason}`.slice(0, 500),
+        url: './',
+        tag: 'bc-failed',
+      });
     }
     res.json({ ok: true, request: updated, push: pushResult });
   });
