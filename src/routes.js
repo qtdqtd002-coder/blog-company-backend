@@ -5,6 +5,7 @@
                                  (또는 multipart/form-data: 동일 필드 + attachment=파일 1개)
                                  purpose=글의 목적(post-purpose-guide.md 라벨). 알 수 없으면 '기타'로 정규화.
      GET  {base}/requests        → 200 [{id, topic, material, writer, purpose, status, createdAt, attachment?, ...}]
+     POST {base}/requests/:id/cancel  body={by?} → 200 {ok, request} (요청자 취소 — 'received'만, 토큰 불필요)
      GET  {base}/requests/:id/attachment  (관리자) → 첨부 파일 다운로드(작성 러너용, 1회용)
      GET  {base}/hidden          → 200 {rels:[...]}                (숨김된 글 rel 목록 — 토큰 불필요)
      POST {base}/hidden          body={rel, by?}   → 201 {ok, rels} (즉시 숨김 — 토큰 불필요)
@@ -320,6 +321,29 @@ function buildRouter(store) {
       });
     }
     res.json({ ok: true, request: updated, push: pushResult });
+  });
+
+  // ---- 요청 취소(삭제) — 요청자가 큐에서 뺀다. 토큰 불필요(hidden/mpub 와 동일 정책). ----
+  //  설계: 아직 시작 안 한('received') 요청만 취소 가능 → status='skipped', error='요청자 취소'.
+  //        이미 'processing'(러너가 작성 중)/'published'/'failed'/'skipped' 는 취소 불가(409).
+  //        러너가 ?status=received 만 가져가므로 skipped 는 자동으로 큐에서 빠진다.
+  //        상태 갱신 엔드포인트와 달리 푸시를 보내지 않는다(요청자 본인의 취소이므로).
+  r.post('/requests/:id/cancel', async (req, res) => {
+    const id = req.params.id;
+    const cur = store.requests.find((x) => x.id === id);
+    if (!cur) return res.status(404).json({ error: '해당 id 요청 없음' });
+    if (cur.status !== 'received') {
+      return res.status(409).json({ error: '이미 ' + cur.status + ' 상태라 취소할 수 없습니다(접수 대기 중인 요청만 취소 가능).', status: cur.status });
+    }
+    const by = (req.body && req.body.by ? String(req.body.by).slice(0, 64) : null);
+    const patch = { status: 'skipped', statusAt: Date.now(), error: '요청자 취소' + (by ? ' (' + by + ')' : '') };
+    // 1회용 첨부 정리
+    if (cur.attachment && cur.attachment.storedAs && !cur.attachmentDeletedAt) {
+      deleteAttachmentFile(cur.attachment.storedAs);
+      patch.attachmentDeletedAt = Date.now();
+    }
+    const updated = await store.requests.update(id, patch);
+    res.json({ ok: true, request: updated });
   });
 
   // ---- stale 'processing' 즉시 회수 (관리자: 러너가 회차 시작 때 호출) ----
