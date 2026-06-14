@@ -83,6 +83,10 @@ function initStore(dataDir) {
     // 수동 발행완료(manual published) — 글 rel 단위 소프트 '발행됨' 표시. admin 토큰 없이 누구나 표시/취소.
     // 자동검증 발행(깃 published.json)과 별개의 소프트 플래그 — 사이트·PWA가 union 해서 '발행됨' 처리.
     mpub: createCollection(dataDir, 'mpub'),
+    // 점검(maintenance) 플래그 — 단일 레코드(id:'maint'). PC의 쓰담 스킬 수정 잠금(.bc-locks)이
+    // 활성일 때 on-skill-edit 훅이 POST /maintenance 로 켠다. TTL(기본 10분) 지나면 GET에서 자동 꺼짐.
+    // 앱·사이트 '작업 큐'가 GET /maintenance 로 읽어 "점검 중 — 발행 일시 중단" 배너를 띄운다.
+    maintenance: createCollection(dataDir, 'maintenance'),
   };
 }
 

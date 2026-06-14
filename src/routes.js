@@ -354,6 +354,40 @@ function buildRouter(store) {
     res.json({ ok: true, requeued: result.requeued, failed: result.failed, checked: result.checked });
   });
 
+  // ====================================================================
+  //  점검(maintenance) 상태 — 앱·사이트 '작업 큐' 배너용.
+  //  설계: PC의 쓰담 스킬 수정 잠금(.bc-locks)이 활성이면 on-skill-edit 훅이 POST /maintenance 로
+  //        active=true(+ttlMs)를 켠다. 스킬 편집이 멈추면 더 통지가 없고, since+ttlMs 가 지나면
+  //        GET 에서 자동으로 active=false 로 계산된다(명시적 해제 불필요 — PC가 죽어도 안 박힘).
+  //        동시발행 직렬화(mutex)는 '점검'이 아니므로 여기서 다루지 않는다(스킬 수정만 점검).
+  //  GET 은 공개(누구나 큐 화면에서 읽음), POST 는 관리자(PC 훅).
+  // ====================================================================
+  function maintenanceState() {
+    const rec = store.maintenance.find((x) => x.id === 'maint');
+    const now = Date.now();
+    let live = !!(rec && rec.active && rec.since && (now - rec.since) < (rec.ttlMs || 0));
+    // ★발행중(processing)인 요청이 있으면 점검 배너를 띄우지 않는다 — 실제로 발행이 진행 중이므로
+    //   '발행 일시 중단' 문구는 모순이 된다(사용자 지시 2026-06-15).
+    if (live && store.requests.all().some((r) => r && r.status === 'processing')) live = false;
+    return {
+      active: live,
+      reason: live ? (rec.reason || '점검 중') : null,
+      since: live ? rec.since : null,
+      until: live ? rec.since + rec.ttlMs : null,
+    };
+  }
+  r.get('/maintenance', (req, res) => res.json(maintenanceState()));
+  r.post('/maintenance', requireAdmin, async (req, res) => {
+    const body = req.body || {};
+    const active = !!body.active;
+    // ttl: 1분~6시간 사이로 강제(기본 10분 = 스킬락 TTL과 일치).
+    const ttlMs = Math.min(Math.max(parseInt(body.ttlMs, 10) || 600000, 60000), 6 * 60 * 60 * 1000);
+    const reason = (body.reason ? String(body.reason) : '점검 중').slice(0, 200);
+    const rec = { id: 'maint', active, reason, ttlMs, since: active ? Date.now() : 0, updatedAt: Date.now() };
+    await store.maintenance.upsertBy((x) => x.id, rec);
+    res.json({ ok: true, state: maintenanceState() });
+  });
+
   // ---- 푸시 구독 저장 ----
   r.post('/push/subscribe', async (req, res) => {
     const sub = req.body || {};
