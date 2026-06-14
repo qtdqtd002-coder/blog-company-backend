@@ -12,7 +12,7 @@
    ============================================================ */
 const config = require('../config');
 
-const WRITERS = ['봄딩', '영도', '겜더쿠'];
+const WRITERS = ['봄딩', '영도', '겜더쿠', '연봄'];
 
 // ★글의 목적(purpose) — 정본 shared/blog-writing/post-purpose-guide.md 의 라벨과 1:1.
 // PWA/사이트 요청이 필수로 보내는 값. 알 수 없는 값은 '기타'로 정규화한다(거부하지 않음).
