@@ -140,6 +140,12 @@ function buildRouter(store) {
     if (writer && !runner.WRITERS.includes(writer)) {
       writer = ''; // 알 수 없는 작성자는 미지정 처리(거부하지 않음)
     }
+    // ★휴면 작성자(2026-08-14): 겜더쿠·연봄은 발행을 중단했다. 조용히 다른 작성자로 바꾸지 않고 명시적으로 거절한다
+    // (자동 배정으로 넘기면 요청자가 원하지 않은 블로그에 글이 올라간다).
+    if (writer && runner.INACTIVE_WRITERS.includes(writer)) {
+      if (req.file) deleteAttachmentFile(req.file.filename);
+      return res.status(400).json({ error: `'${writer}' 작성자는 현재 휴면 상태라 새 글 요청을 받지 않습니다.` });
+    }
     // 글의 목적: 정본 라벨이 아니면 '기타'로 정규화(거부하지 않음). 빈 값(옛 클라이언트)은 null.
     if (purpose && !runner.PURPOSES.includes(purpose)) {
       purpose = runner.DEFAULT_PURPOSE;

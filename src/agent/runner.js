@@ -12,7 +12,13 @@
    ============================================================ */
 const config = require('../config');
 
-const WRITERS = ['봄딩', '영도', '겜더쿠', '연봄'];
+const WRITERS = ['봄딩', '영도', '겜더쿠', '연봄'];  // ★김복리 제거(2026-08-04 작성자 폐지). 하루살이는 아직 미등재 — 필요해지면 여기에 추가한다(누락 시 routes.js:140이 writer를 null로 지운다).
+
+// ★휴면(inactive) 작성자 — 2026-08-14 사용자 지시로 트렌드·발행 요청 배선을 끊었다(폐지 아님).
+// WRITERS 에서 지우지 않고 별도로 둔 이유: 과거 요청 646건의 writer 값이 유효한 채로 남아야 목록·통계가 깨지지 않는다.
+// 새 요청만 거부한다(routes.js POST /requests). 재개하려면 이 배열을 [] 로 되돌리고 재배포한다.
+// 정본 = 쓰담v2/canon/config.json → writers.inactive.
+const INACTIVE_WRITERS = ['겜더쿠', '연봄'];
 
 // ★글의 목적(purpose) — 정본 shared/blog-writing/post-purpose-guide.md 의 라벨과 1:1.
 // PWA/사이트 요청이 필수로 보내는 값. 알 수 없는 값은 '기타'로 정규화한다(거부하지 않음).
@@ -105,4 +111,4 @@ function escapeHtml(s) {
   ));
 }
 
-module.exports = { processRequest, generatePost, publishPost, autoGenerate, WRITERS, PURPOSES, DEFAULT_PURPOSE };
+module.exports = { processRequest, generatePost, publishPost, autoGenerate, WRITERS, INACTIVE_WRITERS, PURPOSES, DEFAULT_PURPOSE };
