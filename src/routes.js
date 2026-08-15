@@ -265,6 +265,66 @@ function buildRouter(store) {
     res.json({ ok: true, rel, removed, rels });
   });
 
+  // ====================================================================
+  //  꼭 다룰 게임(pins) — 다음 회차 트렌드 데스크가 반드시 주제를 뽑을 게임 목록.
+  //  admin 토큰 불필요(누구나 지정/해제 — 숨김·발행완료와 같은 결).
+  //  설계: hidden·mpub 은 '집합에 하나씩 넣고 뺀다'지만 이건 **순서 있는 목록 전체 교체**다.
+  //        (사용자가 상자에서 칩을 지우고 더하는 UI라, 부분 연산보다 최종 상태를 그대로 저장하는 쪽이
+  //         레이스에 강하고 클라이언트도 단순하다.) 그래서 레코드 1개(id:'pins')에 배열로 둔다.
+  //  소비자: PC 의 daily-topic-desk 스킬이 회차 시작 때 GET /pins 로 읽는다.
+  //  안전: 게임명은 문자열 키일 뿐(파일 경로·명령으로 쓰지 않음). 길이·개수 상한으로 디스크 보호.
+  // ====================================================================
+  const PINS_MAX = 8;            // 저장 상한(사용자 지정: 최대 8종)
+  const PIN_NAME_MAX = 40;       // 게임명 1개 길이 상한
+
+  // 배열을 '저장 가능한 최종 상태'로 정규화 — 공백 정리 → 빈값 제거 → 중복 제거(공백 무시 비교) → 상한 절단.
+  // ★중복 판정에서 공백을 지우는 이유: '두근두근 타운'과 '두근두근타운'이 따로 저장되면
+  //   데스크가 같은 게임을 두 번 조사한다(핀 8칸을 낭비).
+  function normPins(v) {
+    const arr = Array.isArray(v) ? v : [];
+    const out = [];
+    const seen = new Set();
+    for (const raw of arr) {
+      const name = String(raw == null ? '' : raw).replace(/\s+/g, ' ').trim().slice(0, PIN_NAME_MAX);
+      if (!name) continue;
+      const key = name.replace(/\s+/g, '').toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(name);
+      if (out.length >= PINS_MAX) break;
+    }
+    return out;
+  }
+
+  function pinsState() {
+    const rec = store.pins.find((x) => x.id === 'pins');
+    return {
+      games: (rec && Array.isArray(rec.games)) ? rec.games : [],
+      max: PINS_MAX,
+      updatedAt: (rec && rec.updatedAt) || null,
+    };
+  }
+
+  // 현재 목록 — 사이트·PWA 가 트렌드 탭 로드 시, 데스크 스킬이 회차 시작 시 호출.
+  r.get('/pins', (req, res) => res.json(pinsState()));
+
+  // 목록 전체 교체(즉시) — body { games:[...], source? }. 빈 배열이면 전부 해제.
+  // 8개를 넘겨도 거부하지 않고 앞에서 8개만 저장한다(사용자 입력 UI 는 이미 8칸에서 막는다).
+  r.post('/pins', async (req, res) => {
+    const body = req.body || {};
+    if (!Array.isArray(body.games)) {
+      return res.status(400).json({ error: 'games(게임 이름 배열)는 필수입니다.' });
+    }
+    const games = normPins(body.games);
+    await store.pins.upsertBy((x) => x.id, {
+      id: 'pins',
+      games,
+      source: (body.source || 'web').toString().slice(0, 32),
+      updatedAt: Date.now(),
+    });
+    res.status(201).json(Object.assign({ ok: true }, pinsState()));
+  });
+
   // ---- 첨부 다운로드 (관리자: 작성 러너가 1회용 문서를 받아간다) ----
   r.get('/requests/:id/attachment', requireAdmin, (req, res) => {
     const rec = store.requests.find((x) => x.id === req.params.id);

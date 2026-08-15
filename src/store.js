@@ -83,6 +83,11 @@ function initStore(dataDir) {
     // 수동 발행완료(manual published) — 글 rel 단위 소프트 '발행됨' 표시. admin 토큰 없이 누구나 표시/취소.
     // 자동검증 발행(깃 published.json)과 별개의 소프트 플래그 — 사이트·PWA가 union 해서 '발행됨' 처리.
     mpub: createCollection(dataDir, 'mpub'),
+    // 꼭 다룰 게임(pins) — 트렌드 데스크가 '내일 회차에 반드시 주제를 뽑을 게임' 목록. 단일 레코드(id:'pins').
+    // admin 토큰 불필요(누구나 지정/해제) — 사이트·PWA 트렌드 탭 최상단 상자가 쓰고,
+    // PC의 daily-topic-desk 스킬이 회차 시작 때 GET /pins 로 읽어 그 게임마다 주제 3~5개를 만든다.
+    // 목록형(hidden·mpub)이 아니라 '순서 있는 전체 교체'라 컬렉션에 레코드 1개만 둔다(최대 8종).
+    pins: createCollection(dataDir, 'pins'),
     // 점검(maintenance) 플래그 — 단일 레코드(id:'maint'). PC의 쓰담 스킬 수정 잠금(.bc-locks)이
     // 활성일 때 on-skill-edit 훅이 POST /maintenance 로 켠다. TTL(기본 10분) 지나면 GET에서 자동 꺼짐.
     // 앱·사이트 '작업 큐'가 GET /maintenance 로 읽어 "점검 중 — 발행 일시 중단" 배너를 띄운다.
