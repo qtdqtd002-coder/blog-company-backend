@@ -140,7 +140,7 @@ function buildRouter(store) {
     if (writer && !runner.WRITERS.includes(writer)) {
       writer = ''; // 알 수 없는 작성자는 미지정 처리(거부하지 않음)
     }
-    // ★휴면 작성자(2026-08-14): 겜더쿠·연봄은 발행을 중단했다. 조용히 다른 작성자로 바꾸지 않고 명시적으로 거절한다
+    // ★휴면 작성자(2026-08-14 겜더쿠·연봄 · 2026-09-02 하루살이): 발행을 중단했다. 조용히 다른 작성자로 바꾸지 않고 명시적으로 거절한다
     // (자동 배정으로 넘기면 요청자가 원하지 않은 블로그에 글이 올라간다).
     if (writer && runner.INACTIVE_WRITERS.includes(writer)) {
       if (req.file) deleteAttachmentFile(req.file.filename);
