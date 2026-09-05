@@ -36,7 +36,8 @@ const config = {
 
   // 새 글 요청 첨부(외주 1회용 참고문서) 제한
   attachment: {
-    maxBytes: parseInt(process.env.ATTACH_MAX_BYTES || String(10 * 1024 * 1024), 10), // 기본 10MB
+    maxBytes: parseInt(process.env.ATTACH_MAX_BYTES || String(20 * 1024 * 1024), 10), // 기본 20MB(파일당) — 2026-09-05 10→20MB
+    maxFiles: parseInt(process.env.ATTACH_MAX_FILES || '5', 10),                        // 요청당 최대 5개 — 2026-09-05 1→5
     // 허용 확장자(소문자, 점 없이). hwp(구포맷)는 서버 추출이 까다로워 1차 제외 — hwpx는 허용.
     allowedExt: ['docx', 'xlsx', 'pdf', 'txt', 'hwpx'],
   },
@@ -49,7 +50,7 @@ const config = {
 
   agent: {
     anthropicApiKey: process.env.ANTHROPIC_API_KEY || '',
-    anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-opus-4-8',
+    anthropicModel: process.env.ANTHROPIC_MODEL || 'claude-opus-5',
     githubToken: process.env.GITHUB_TOKEN || '',
     gitRepo: process.env.GIT_PUBLISH_REPO || '',
     gitBranch: process.env.GIT_PUBLISH_BRANCH || 'main',

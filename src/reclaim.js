@@ -24,6 +24,12 @@ function deleteAttachmentFile(storedAs) {
   if (!storedAs) return;
   try { fs.unlinkSync(path.join(config.uploadDir, path.basename(String(storedAs)))); } catch (_) {}
 }
+// 신 attachments[](최대 5개) · 옛 attachment 단일 모두 — 2026-09-05
+function attachmentsOf(rec) {
+  if (!rec) return [];
+  if (Array.isArray(rec.attachments) && rec.attachments.length) return rec.attachments.filter(Boolean);
+  return rec.attachment ? [rec.attachment] : [];
+}
 
 /* stale processing 요청들을 한 번 훑어 복구한다.
    반환: { requeued: [id...], failed: [{id, attempts}...], checked, now } */
@@ -50,8 +56,8 @@ async function reclaimStale(store, now) {
         reclaimedAt: t,
         error: `작성 에이전트 미완료로 회수 — 'processing' 상태가 ${Math.round((t - since) / 60000)}분 이상 지속(시도 ${attempts}회 초과).`,
       };
-      if (r.attachment && r.attachment.storedAs && !r.attachmentDeletedAt) {
-        deleteAttachmentFile(r.attachment.storedAs);
+      if (attachmentsOf(r).length && !r.attachmentDeletedAt) {
+        attachmentsOf(r).forEach((a) => deleteAttachmentFile(a.storedAs));
         patch.attachmentDeletedAt = t;
       }
       await store.requests.update(r.id, patch);

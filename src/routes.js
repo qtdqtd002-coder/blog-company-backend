@@ -1,12 +1,14 @@
 'use strict';
 /* API 라우트 — PWA app/api.js 의 BC_CONFIG 계약과 1:1 일치.
    계약:
-     POST {base}/requests        body={topic, material, writer, purpose}  → 201 {id, status, purpose}
-                                 (또는 multipart/form-data: 동일 필드 + attachment=파일 1개)
-                                 purpose=글의 목적(post-purpose-guide.md 라벨). 알 수 없으면 '기타'로 정규화.
-     GET  {base}/requests        → 200 [{id, topic, material, writer, purpose, status, createdAt, attachment?, ...}]
+     POST {base}/requests        body={topic, material, writer, purpose?}  → 201 {id, status, purpose, attachment, attachments}
+                                 (또는 multipart/form-data: 동일 필드 + attachment=파일 **최대 5개, 개당 20MB** — 2026-09-05. 같은 필드명을 반복)
+                                 purpose=글의 목적(post-purpose-guide.md 라벨). 알 수 없으면 '기타', 빈 값은 null(사이트는 09-05부터 안 보냄).
+     GET  {base}/requests        → 200 [{id, topic, material, writer, purpose, status, createdAt, attachment?, attachments?, ...}]
+                                 attachments=[{name,storedAs,type,size}] · attachment=첫 파일(옛 클라이언트 호환)
      POST {base}/requests/:id/cancel  body={by?} → 200 {ok, request} (요청자 취소 — 'received'만, 토큰 불필요)
-     GET  {base}/requests/:id/attachment  (관리자) → 첨부 파일 다운로드(작성 러너용, 1회용)
+     GET  {base}/requests/:id/attachment       (관리자) → 첫 첨부 다운로드(옛 경로 호환)
+     GET  {base}/requests/:id/attachments/:n   (관리자) → n번째(0부터) 첨부 다운로드(작성 러너용, 1회용)
      GET  {base}/hidden          → 200 {rels:[...]}                (숨김된 글 rel 목록 — 토큰 불필요)
      POST {base}/hidden          body={rel, by?}   → 201 {ok, rels} (즉시 숨김 — 토큰 불필요)
      POST {base}/hidden/unhide   body={rel}        → 200 {ok, rels} (숨김 해제 — 토큰 불필요)
@@ -40,6 +42,16 @@ function fixName(name) {
   try { return Buffer.from(String(name || ''), 'latin1').toString('utf8'); } catch (_) { return String(name || ''); }
 }
 
+// 요청에 딸린 첨부 전부(신 attachments[] · 옛 attachment 단일) — 종결 시 한꺼번에 지운다.
+function attachmentsOf(rec) {
+  if (!rec) return [];
+  if (Array.isArray(rec.attachments) && rec.attachments.length) return rec.attachments.filter(Boolean);
+  return rec.attachment ? [rec.attachment] : [];
+}
+function deleteAllAttachments(rec) {
+  attachmentsOf(rec).forEach((a) => { if (a && a.storedAs) deleteAttachmentFile(a.storedAs); });
+}
+
 // ---- 첨부(외주 1회용 참고문서) 업로드 설정 ----
 fs.mkdirSync(config.uploadDir, { recursive: true });
 const uploadStorage = multer.diskStorage({
@@ -56,13 +68,19 @@ function attachFilter(req, file, cb) {
   }
   cb(null, true);
 }
-const uploader = multer({ storage: uploadStorage, fileFilter: attachFilter, limits: { fileSize: config.attachment.maxBytes, files: 1 } });
-// multipart 가 아니면 통과, multipart 면 'attachment' 1개 파싱. 에러는 400 으로 정규화.
+const uploader = multer({ storage: uploadStorage, fileFilter: attachFilter,
+  limits: { fileSize: config.attachment.maxBytes, files: config.attachment.maxFiles } });
+// multipart 가 아니면 통과, multipart 면 'attachment' 필드의 파일들(최대 maxFiles)을 파싱. 에러는 400 으로 정규화.
+// ★오류가 나도 이미 디스크에 쓰인 파일이 남을 수 있으므로 req.files 를 전부 치운다.
 function attachmentUpload(req, res, next) {
-  uploader.single('attachment')(req, res, (err) => {
+  uploader.array('attachment', config.attachment.maxFiles)(req, res, (err) => {
     if (err) {
+      (req.files || []).forEach((f) => deleteAttachmentFile(f.filename));
+      const mb = Math.round(config.attachment.maxBytes / 1024 / 1024);
       const msg = err.code === 'LIMIT_FILE_SIZE'
-        ? '첨부가 너무 큽니다(최대 ' + Math.round(config.attachment.maxBytes / 1024 / 1024) + 'MB).'
+        ? '첨부가 너무 큽니다(파일당 최대 ' + mb + 'MB).'
+        : (err.code === 'LIMIT_FILE_COUNT' || err.code === 'LIMIT_UNEXPECTED_FILE')
+          ? '첨부는 최대 ' + config.attachment.maxFiles + '개까지입니다.'
         : err.code === 'ATTACH_TYPE' ? err.message
         : '첨부 처리 오류: ' + err.message;
       return res.status(400).json({ error: msg });
@@ -133,8 +151,9 @@ function buildRouter(store) {
     const material = (body.material || '').toString().trim();
     let writer = (body.writer || '').toString().trim();
     let purpose = (body.purpose || '').toString().trim();
+    const files = Array.isArray(req.files) ? req.files : (req.file ? [req.file] : []);
     if (!topic) {
-      if (req.file) deleteAttachmentFile(req.file.filename); // 검증 실패 시 업로드 파일 정리
+      files.forEach((f) => deleteAttachmentFile(f.filename)); // 검증 실패 시 업로드 파일 정리
       return res.status(400).json({ error: 'topic(주제)은 필수입니다.' });
     }
     if (writer && !runner.WRITERS.includes(writer)) {
@@ -143,7 +162,7 @@ function buildRouter(store) {
     // ★휴면 작성자(2026-08-14 겜더쿠·연봄 · 2026-09-02 하루살이): 발행을 중단했다. 조용히 다른 작성자로 바꾸지 않고 명시적으로 거절한다
     // (자동 배정으로 넘기면 요청자가 원하지 않은 블로그에 글이 올라간다).
     if (writer && runner.INACTIVE_WRITERS.includes(writer)) {
-      if (req.file) deleteAttachmentFile(req.file.filename);
+      files.forEach((f) => deleteAttachmentFile(f.filename));
       return res.status(400).json({ error: `'${writer}' 작성자는 현재 휴면 상태라 새 글 요청을 받지 않습니다.` });
     }
     // 글의 목적: 정본 라벨이 아니면 '기타'로 정규화(거부하지 않음). 빈 값(옛 클라이언트)은 null.
@@ -161,16 +180,22 @@ function buildRouter(store) {
       source: (body.source || 'pwa').toString().slice(0, 32),
     };
     // 첨부(외주 1회용 참고문서) — 메타만 기록, 파일은 uploads/ 에. 작성 러너가 받아 '이 글에만' 반영.
-    if (req.file) {
-      const name = fixName(req.file.originalname).slice(0, 200);
-      rec.attachment = { name, storedAs: req.file.filename, type: extOf(name), size: req.file.size };
+    // ★2026-09-05: 최대 5개. attachments[] 가 정본, attachment 는 첫 파일(옛 클라이언트·러너 호환).
+    if (files.length) {
+      rec.attachments = files.map((f) => {
+        const name = fixName(f.originalname).slice(0, 200);
+        return { name, storedAs: f.filename, type: extOf(name), size: f.size };
+      });
+      rec.attachment = rec.attachments[0];
     }
     await store.requests.insert(rec);
 
     // 2b 설계(Option 2): VM 은 접수만 한다('received'로 큐잉).
     // 실제 작성·발행은 PC의 Claude Code 예약 러너가 GET /requests?status=received 로
     // 가져가 game-blog-publish 파이프라인으로 처리한 뒤, POST /requests/:id/status 로 상태를 갱신한다.
-    res.status(201).json({ id: rec.id, status: rec.status, purpose: rec.purpose, attachment: rec.attachment ? rec.attachment.name : null });
+    res.status(201).json({ id: rec.id, status: rec.status, purpose: rec.purpose,
+      attachment: rec.attachment ? rec.attachment.name : null,
+      attachments: (rec.attachments || []).map((a) => a.name) });
   });
 
   // ====================================================================
@@ -326,12 +351,22 @@ function buildRouter(store) {
   });
 
   // ---- 첨부 다운로드 (관리자: 작성 러너가 1회용 문서를 받아간다) ----
-  r.get('/requests/:id/attachment', requireAdmin, (req, res) => {
-    const rec = store.requests.find((x) => x.id === req.params.id);
-    if (!rec || !rec.attachment) return res.status(404).json({ error: '해당 요청에 첨부 없음' });
-    const fp = path.join(config.uploadDir, path.basename(rec.attachment.storedAs));
+  function sendAttachment(res, rec, n) {
+    const list = attachmentsOf(rec);
+    if (!rec || !list.length) return res.status(404).json({ error: '해당 요청에 첨부 없음' });
+    const a = list[n];
+    if (!a) return res.status(404).json({ error: '첨부 번호 범위 밖(0~' + (list.length - 1) + ')' });
+    const fp = path.join(config.uploadDir, path.basename(a.storedAs));
     if (!fs.existsSync(fp)) return res.status(410).json({ error: '첨부가 이미 삭제됨(1회용 — 발행/실패 처리 후 정리됨).' });
-    res.download(fp, rec.attachment.name);
+    res.download(fp, a.name);
+  }
+  r.get('/requests/:id/attachment', requireAdmin, (req, res) => {            // 옛 경로 = 첫 파일
+    sendAttachment(res, store.requests.find((x) => x.id === req.params.id), 0);
+  });
+  r.get('/requests/:id/attachments/:n', requireAdmin, (req, res) => {        // n번째(0부터)
+    const n = parseInt(req.params.n, 10);
+    if (!Number.isInteger(n) || n < 0) return res.status(400).json({ error: '첨부 번호는 0 이상 정수' });
+    sendAttachment(res, store.requests.find((x) => x.id === req.params.id), n);
   });
 
   // ---- 요청 상태 갱신 (관리자: 작성 러너가 호출) ----
@@ -356,11 +391,11 @@ function buildRouter(store) {
     if (body.postRel != null) patch.postRel = String(body.postRel).slice(0, 500);
     if (body.error != null) patch.error = String(body.error).slice(0, 1000);
 
-    // 1회용 첨부 정리: 종료 상태가 되면 업로드 파일을 삭제(문서는 해당 글에만 쓰이고 폐기).
+    // 1회용 첨부 정리: 종료 상태가 되면 업로드 파일을 전부 삭제(문서는 해당 글에만 쓰이고 폐기).
     if (['published', 'failed', 'skipped'].includes(status)) {
       const cur = store.requests.find((x) => x.id === id);
-      if (cur && cur.attachment && cur.attachment.storedAs && !cur.attachmentDeletedAt) {
-        deleteAttachmentFile(cur.attachment.storedAs);
+      if (cur && attachmentsOf(cur).length && !cur.attachmentDeletedAt) {
+        deleteAllAttachments(cur);
         patch.attachmentDeletedAt = Date.now();
       }
     }
@@ -403,9 +438,9 @@ function buildRouter(store) {
     }
     const by = (req.body && req.body.by ? String(req.body.by).slice(0, 64) : null);
     const patch = { status: 'skipped', statusAt: Date.now(), error: '요청자 취소' + (by ? ' (' + by + ')' : '') };
-    // 1회용 첨부 정리
-    if (cur.attachment && cur.attachment.storedAs && !cur.attachmentDeletedAt) {
-      deleteAttachmentFile(cur.attachment.storedAs);
+    // 1회용 첨부 정리(전부)
+    if (attachmentsOf(cur).length && !cur.attachmentDeletedAt) {
+      deleteAllAttachments(cur);
       patch.attachmentDeletedAt = Date.now();
     }
     const updated = await store.requests.update(id, patch);

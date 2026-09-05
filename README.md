@@ -46,7 +46,7 @@ POST {base}/requests        (Content-Type: application/json)
 → 201 { "id": "req_...", "status": "received", "purpose": "게임 정보", "attachment": null }
 ```
 > `purpose`(글의 목적)는 PWA/사이트가 **필수 선택**해 보낸다. 정본 라벨(위 10종, `shared/blog-writing/post-purpose-guide.md`)이 아니면 서버가 `기타`로 정규화하고, 빈 값(옛 클라이언트)은 `null`로 저장한다. 작성 러너가 이 값으로 **목적별 최소 정보 가이드**를 적용한다.
-첨부(외주 1회용 참고문서)가 있으면 **multipart/form-data** 로 전송: 같은 텍스트 필드 + `attachment`(파일 1개).
+첨부(외주 1회용 참고문서)가 있으면 **multipart/form-data** 로 전송: 같은 텍스트 필드 + `attachment`(★2026-09-05부터 **최대 5개, 파일당 20MB** — 같은 필드명을 반복). 응답 `attachments`=파일명 배열, `attachment`=첫 파일(호환). 러너는 `GET {base}/requests/:id/attachments/:n`(0부터)으로 하나씩 받는다.
 - 허용: `docx, xlsx, pdf, txt, hwpx` · 최대 10MB(`ATTACH_MAX_BYTES`). 파일은 `data/uploads/` 에 저장.
 - 작성 러너가 `GET {base}/requests/:id/attachment`(관리자)로 받아 **그 글에만** 반영하고, 발행/실패 처리 시 서버가 원본을 자동 삭제(1회용).
 
