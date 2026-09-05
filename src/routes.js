@@ -404,10 +404,13 @@ function buildRouter(store) {
     if (!updated) return res.status(404).json({ error: '해당 id 요청 없음' });
 
     let pushResult = null;
+    // ★작성자 이름을 본문 맨 앞에 붙인다(2026-09-05). 푸시는 구독자 «전원»에게 브로드캐스트되므로
+    //   이름이 없으면 받는 사람이 '내 글인가'를 판단할 수 없다(봄딩 PC 알림 요구사항에서 드러난 결함).
+    const who = updated.writer ? `${updated.writer} — ` : '';
     if (status === 'published') {
       pushResult = await push.broadcast(store, {
         title: '요청하신 글이 발행됐어요',
-        body: updated.title || updated.topic || '블로그 컴퍼니에 새 글이 올라왔어요.',
+        body: (who + (updated.title || updated.topic || '블로그 컴퍼니에 새 글이 올라왔어요.')).slice(0, 500),
         url: updated.publishUrl || './',
         tag: 'bc-published',
       });
@@ -416,7 +419,7 @@ function buildRouter(store) {
       const reason = updated.error ? ` — ${updated.error}` : '';
       pushResult = await push.broadcast(store, {
         title: '요청하신 글을 발행하지 못했어요',
-        body: `"${updated.topic || updated.title || '요청'}"${reason}`.slice(0, 500),
+        body: `${who}"${updated.topic || updated.title || '요청'}"${reason}`.slice(0, 500),
         url: './',
         tag: 'bc-failed',
       });
