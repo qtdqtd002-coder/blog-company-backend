@@ -380,11 +380,19 @@ function buildRouter(store) {
     if (!VALID_STATUS.includes(status)) {
       return res.status(400).json({ error: 'status 는 ' + VALID_STATUS.join('|') + ' 중 하나' });
     }
-    const patch = { status, statusAt: Date.now() };
+    // ★멱등 가드(2026-09-12 신설) — 같은 종료 상태로 두 번 들어오면 '다시 알리지' 않는다.
+    //   실측 사고: 러너 §4.5-e 가 잡의 `publishedPosted` 필드를 근거로 published 를 재POST 하는데
+    //   drain.ps1 은 그 필드를 애초에 쓰지 않는다(코드 0건) → 회차마다 재전송 → **구독자 전원에게
+    //   같은 글 웹푸시 2회**, 그리고 statusAt 덮어쓰기로 발주→발행 리드타임 지표까지 오염됐다.
+    //   상태를 바꾸는 POST 는 그대로 받고(멱등), 부수효과(푸시·statusAt)만 첫 전환에 한정한다.
+    const before = store.requests.find((x) => x.id === id);
+    const repeat = !!(before && before.status === status);
+
+    const patch = { status };
+    if (!repeat) patch.statusAt = Date.now();
     // 'processing' 전환마다 시도 횟수 +1 — 회수기(reclaim)가 무한 재시도를 막는 데 쓴다.
-    if (status === 'processing') {
-      const cur = store.requests.find((x) => x.id === id);
-      patch.attempts = ((cur && cur.attempts) || 0) + 1;
+    if (status === 'processing' && !repeat) {
+      patch.attempts = ((before && before.attempts) || 0) + 1;
     }
     if (body.title != null) patch.title = String(body.title).slice(0, 300);
     if (body.publishUrl != null) patch.publishUrl = String(body.publishUrl).slice(0, 500);
@@ -407,6 +415,10 @@ function buildRouter(store) {
     // ★작성자 이름을 본문 맨 앞에 붙인다(2026-09-05). 푸시는 구독자 «전원»에게 브로드캐스트되므로
     //   이름이 없으면 받는 사람이 '내 글인가'를 판단할 수 없다(봄딩 PC 알림 요구사항에서 드러난 결함).
     const who = updated.writer ? `${updated.writer} — ` : '';
+    if (repeat) {
+      // 같은 상태 재전송 — 알림 없음. 호출자가 '몇 번 보냈든' 결과가 같게 만든다.
+      return res.json({ ok: true, request: updated, push: null, idempotent: true });
+    }
     if (status === 'published') {
       pushResult = await push.broadcast(store, {
         title: '요청하신 글이 발행됐어요',
