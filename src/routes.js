@@ -15,6 +15,12 @@
      GET  {base}/mpub            → 200 {rels:[...]}                (수동 발행완료 rel 목록 — 토큰 불필요)
      POST {base}/mpub            body={rel, by?}   → 201 {ok, rels} (발행완료 표시 — 토큰 불필요)
      POST {base}/mpub/unpub      body={rel}        → 200 {ok, rels} (발행완료 취소 — 토큰 불필요)
+     GET  {base}/why             → 200 {reasons, items, counts}    (미채택 사유 + 사유 어휘 + 집계 — 토큰 불필요)
+     POST {base}/why             body={rel, reason, by?} → 201     (사유 기록·덮어쓰기. reason 은 서버 목록 안에서만)
+     POST {base}/why/clear       body={rel}        → 200           (사유 지우기)
+     GET  {base}/topic           → 200 {rels:[...]}                (인플루언서 토픽 등록 표시 — 토큰 불필요)
+     POST {base}/topic           body={rel, by?}   → 201 {ok, rels}
+     POST {base}/topic/untopic   body={rel}        → 200 {ok, rels}
      GET  {base}/health          → 200 {ok, ...}
      POST {base}/push/subscribe  body=PushSubscription(JSON)      → 201 {ok}
    (추가) POST {base}/push/test  → 구독자에게 테스트 푸시(운영 확인용)              */
@@ -348,6 +354,120 @@ function buildRouter(store) {
       updatedAt: Date.now(),
     });
     res.status(201).json(Object.assign({ ok: true }, pinsState()));
+  });
+
+  // ====================================================================
+  //  미채택 사유(why) — 우리 초안을 작성자가 실블로그에 «안 올린 이유». admin 토큰 불필요.
+  //  설계: hidden·mpub 은 «집합에 넣고 뺀다»지만 이건 rel 하나당 **최신 사유 1개**다(마음이 바뀌면 덮어쓴다).
+  //        사유는 **서버가 가진 목록 안에서만** 받는다 — 자유 입력이면 집계가 안 되고, 집계가 안 되면
+  //        «분량이 문제인가 사실이 문제인가»를 못 가른다(이 기능의 존재 이유가 그 판정이다).
+  //  왜: 영도는 우리 초안 채택률이 4~14%인데(봄딩 74~84%) 사유를 물은 적이 없어 처방이 원인 없이 나갔다
+  //      (2026-09-13 진단 · docs/2026-09-13_메이트_선정_불리요소_공식기준_정리.html «파이프라인이 도달하지 않는다»).
+  //  소비자: 주간 헬스체크가 집계해 writer-playbook 의 그 작성자 블록을 갱신한다.
+  //  안전: rel·reason 모두 문자열 키(파일 경로·명령으로 쓰지 않음). 총 개수 상한으로 디스크 보호.
+  // ====================================================================
+  const WHY_MAX = 5000;
+  // 사유 ↔ 그 사유가 가리키는 처방. 라벨·처방을 클라이언트가 지어내지 않게 서버가 같이 내려 준다.
+  const WHY_REASONS = [
+    { id: 'long',     label: '너무 길다',      fix: '분량 밴드 하향' },
+    { id: 'wrong',    label: '사실이 틀렸다',  fix: 'qa-fact 강화' },
+    { id: 'offtopic', label: '주제가 안 맞다', fix: '발주 각도 재조정' },
+    { id: 'dup',      label: '이미 쓴 내용',   fix: '중복 판정 강화' },
+    { id: 'voice',    label: '문체가 다르다',  fix: 'style-guide 보강' },
+    { id: 'notime',   label: '시간이 없었다',  fix: '붙여넣기 마찰 감소' },
+  ];
+  const WHY_IDS = WHY_REASONS.map((x) => x.id);
+  function whyState() {
+    const items = store.why.all()
+      .map((x) => ({ rel: x.rel, reason: x.reason, by: x.by || null, at: x.at || null }))
+      .filter((x) => x.rel && x.reason);
+    const counts = {};
+    items.forEach((x) => { counts[x.reason] = (counts[x.reason] || 0) + 1; });
+    return { reasons: WHY_REASONS, items, counts };
+  }
+
+  // 현재 사유 목록 + 사유 어휘 + 집계 — 사이트·PWA 가 로드 시 호출.
+  r.get('/why', (req, res) => res.json(whyState()));
+
+  // 사유 기록(덮어쓰기) — body { rel, reason, by? }. reason 이 목록 밖이면 400.
+  r.post('/why', async (req, res) => {
+    const body = req.body || {};
+    const rel = cleanRel(body.rel);
+    const reason = String(body.reason == null ? '' : body.reason).trim();
+    if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    if (WHY_IDS.indexOf(reason) < 0) {
+      return res.status(400).json({ error: 'reason 은 다음 중 하나여야 합니다: ' + WHY_IDS.join(', ') });
+    }
+    const exists = store.why.find((x) => x.rel === rel);
+    if (exists) {
+      await store.why.update(exists.id, {
+        reason,
+        by: (body.by ? String(body.by).slice(0, 64) : exists.by || null),
+        at: Date.now(),
+      });
+    } else {
+      if (store.why.all().length >= WHY_MAX) {
+        return res.status(429).json({ error: '사유 목록이 한도에 도달했습니다.' });
+      }
+      await store.why.insert({
+        id: genId('why'),
+        rel,
+        reason,
+        by: (body.by ? String(body.by).slice(0, 64) : null),
+        source: (body.source || 'web').toString().slice(0, 32),
+        at: Date.now(),
+      });
+    }
+    res.status(201).json(Object.assign({ ok: true, rel, reason }, whyState()));
+  });
+
+  // 사유 지우기 — body { rel }.
+  r.post('/why/clear', async (req, res) => {
+    const rel = cleanRel((req.body || {}).rel);
+    if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    const removed = await store.why.removeBy((x) => x.rel === rel);
+    res.json(Object.assign({ ok: true, rel, removed }, whyState()));
+  });
+
+  // ====================================================================
+  //  토픽 등록(topic) — 네이버 인플루언서 홈에 토픽으로 올린 글 표시. admin 토큰 불필요. 구조는 mpub 과 같다.
+  //  왜: 인플루언서 토픽은 블로그 글과 «별개 출처»로 AI 브리핑에 인용되는데(2026-09-13 실검색) 봄딩 토픽이 0개다.
+  //      등록 자체는 사람이 로그인해서 해야 하므로(네이버는 발행도 닫힌 플랫폼) 여기서는 «했다/안 했다»만 남긴다.
+  // ====================================================================
+  const TOPIC_MAX = 5000;
+
+  r.get('/topic', (req, res) => {
+    const rels = store.topic.all().map((x) => x.rel).filter(Boolean);
+    res.json({ rels });
+  });
+
+  r.post('/topic', async (req, res) => {
+    const body = req.body || {};
+    const rel = cleanRel(body.rel);
+    if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    const exists = store.topic.find((x) => x.rel === rel);
+    if (!exists) {
+      if (store.topic.all().length >= TOPIC_MAX) {
+        return res.status(429).json({ error: '토픽 목록이 한도에 도달했습니다.' });
+      }
+      await store.topic.insert({
+        id: genId('tpc'),
+        rel,
+        by: (body.by ? String(body.by).slice(0, 64) : null),
+        source: (body.source || 'web').toString().slice(0, 32),
+        at: Date.now(),
+      });
+    }
+    const rels = store.topic.all().map((x) => x.rel).filter(Boolean);
+    res.status(201).json({ ok: true, rel, already: !!exists, rels });
+  });
+
+  r.post('/topic/untopic', async (req, res) => {
+    const rel = cleanRel((req.body || {}).rel);
+    if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    const removed = await store.topic.removeBy((x) => x.rel === rel);
+    const rels = store.topic.all().map((x) => x.rel).filter(Boolean);
+    res.json({ ok: true, rel, removed, rels });
   });
 
   // ---- 첨부 다운로드 (관리자: 작성 러너가 1회용 문서를 받아간다) ----

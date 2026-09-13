@@ -92,6 +92,15 @@ function initStore(dataDir) {
     // 활성일 때 on-skill-edit 훅이 POST /maintenance 로 켠다. TTL(기본 10분) 지나면 GET에서 자동 꺼짐.
     // 앱·사이트 '작업 큐'가 GET /maintenance 로 읽어 "점검 중 — 발행 일시 중단" 배너를 띄운다.
     maintenance: createCollection(dataDir, 'maintenance'),
+    // 미채택 사유(why) — 우리가 쓴 초안을 작성자가 실블로그에 «안 올린 이유». 글 rel 하나당 최신 사유 1개(덮어쓴다).
+    // 왜 필요한가: 영도는 우리 초안이 라이브에 실리는 비율이 4~14%인데(봄딩 74~84%) 사유를 한 번도 물은 적이 없어
+    // 처방이 원인 없이 나갔다(2026-09-13 진단). 사유가 쌓이면 «분량이 문제인가 사실이 문제인가»가 데이터로 갈린다.
+    // admin 토큰 불필요(hidden·mpub 과 같은 결). 소비자 = 주간 헬스체크 집계 → writer-playbook 갱신.
+    why: createCollection(dataDir, 'why'),
+    // 토픽 등록(topic) — 네이버 인플루언서 홈에 토픽으로 등록한 글 표시. 등록은 사람이 로그인해서 한다(자동화 불가).
+    // 왜: 인플루언서 토픽은 블로그 글과 «별개 출처»로 AI 브리핑에 인용된다(2026-09-13 실검색). 봄딩 토픽 0개라
+    // 잊히지 않게 체크만 남긴다. hidden·mpub 과 같은 집합형.
+    topic: createCollection(dataDir, 'topic'),
   };
 }
 
