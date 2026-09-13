@@ -390,6 +390,10 @@ function buildRouter(store) {
 
     const patch = { status };
     if (!repeat) patch.statusAt = Date.now();
+    // ★진행 단계(stage)는 «processing 안에서의 위치»라 큐 상태가 바뀌면 뜻을 잃는다 → 같이 비운다.
+    //   종결(published/failed/skipped)이면 카드가 「작업 중」에서 빠지고, received 면 회수돼 처음부터
+    //   다시 시작하는 것이라, 옛 단계를 남겨 두면 사이트에 «유령 진행률»이 뜬다(2026-09-13).
+    if (status !== 'processing') { patch.stage = null; patch.stageNote = null; patch.stageAt = null; }
     // 'processing' 전환마다 시도 횟수 +1 — 회수기(reclaim)가 무한 재시도를 막는 데 쓴다.
     if (status === 'processing' && !repeat) {
       patch.attempts = ((before && before.attempts) || 0) + 1;
@@ -437,6 +441,35 @@ function buildRouter(store) {
       });
     }
     res.json({ ok: true, request: updated, push: pushResult });
+  });
+
+  // ---- 진행 단계 갱신 (관리자: 파이프라인·아웃박스 스크립트가 호출) — 2026-09-13 신설 ----
+  //  body: { stage, note? }   → stage/stageNote/stageAt 만 바꾼다. 알림 0.
+  //  ★왜 status 와 분리했나: status 는 «큐의 상태»고 부수효과가 크다(웹푸시 브로드캐스트·statusAt
+  //    덮어쓰기·attempts +1·1회용 첨부 삭제). 진행 단계는 한 번의 processing 안에서 여섯 번 바뀌는
+  //    값이라 그 부수효과를 타면 «같은 글로 푸시 6번»이 된다. 그래서 부수효과 없는 전용 경로를 둔다.
+  //  ★stageAt = «그 단계가 시작된 시각». 같은 단계를 다시 보내도 갱신하지 않는다(단계 경과가 튀지 않게).
+  //    note 만 바뀌는 재전송(검수 R1→R2)은 note 를 갱신하되 시작 시각은 그 단계의 첫 보고를 지킨다.
+  //  소비자 = 사이트 홈 「작업 중」 타일의 단계 스텝퍼(index.html tileWork).
+  const VALID_STAGE = ['plan', 'draft', 'qa', 'fix', 'gate', 'publish'];
+  r.post('/requests/:id/stage', requireAdmin, async (req, res) => {
+    const id = req.params.id;
+    const body = req.body || {};
+    const stage = (body.stage || '').toString().trim();
+    if (!VALID_STAGE.includes(stage)) {
+      return res.status(400).json({ error: 'stage 는 ' + VALID_STAGE.join('|') + ' 중 하나' });
+    }
+    const cur = store.requests.find((x) => x.id === id);
+    if (!cur) return res.status(404).json({ error: '해당 id 요청 없음' });
+    // 종결된 요청에는 단계를 붙이지 않는다(끝난 카드에 진행률이 되살아나는 것을 막는다).
+    if (['published', 'failed', 'skipped'].includes(cur.status)) {
+      return res.status(409).json({ error: '이미 종결된 요청(' + cur.status + ')에는 stage 를 쓰지 않는다', request: cur });
+    }
+    const patch = { stage };
+    if (cur.stage !== stage || !cur.stageAt) patch.stageAt = Date.now();
+    patch.stageNote = body.note != null ? String(body.note).slice(0, 60) : null;
+    const updated = await store.requests.update(id, patch);
+    res.json({ ok: true, request: updated });
   });
 
   // ---- 요청 취소(삭제) — 요청자가 큐에서 뺀다. 토큰 불필요(hidden/mpub 와 동일 정책). ----

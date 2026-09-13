@@ -54,6 +54,7 @@ async function reclaimStale(store, now) {
         status: 'failed',
         statusAt: t,
         reclaimedAt: t,
+        stage: null, stageNote: null, stageAt: null,   // 종결 — 진행 단계는 뜻을 잃는다(routes.js 상태 갱신과 같은 계약)
         error: `작성 에이전트 미완료로 회수 — 'processing' 상태가 ${Math.round((t - since) / 60000)}분 이상 지속(시도 ${attempts}회 초과).`,
       };
       if (attachmentsOf(r).length && !r.attachmentDeletedAt) {
@@ -71,7 +72,8 @@ async function reclaimStale(store, now) {
       });
     } else {
       // 재시도 가능 → received 로 되돌림(첨부는 보존: 재시도에 그대로 쓰임).
-      await store.requests.update(r.id, { status: 'received', statusAt: t, reclaimedAt: t });
+      // stage 초기화 — 회수는 «처음부터 다시»라 옛 단계를 남기면 사이트에 유령 진행률이 남는다.
+      await store.requests.update(r.id, { status: 'received', statusAt: t, reclaimedAt: t, stage: null, stageNote: null, stageAt: null });
       result.requeued.push(r.id);
     }
   }
