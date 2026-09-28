@@ -23,7 +23,8 @@
      POST {base}/topic/untopic   body={rel}        → 200 {ok, rels}
      GET  {base}/health          → 200 {ok, ...}
      POST {base}/push/subscribe  body=PushSubscription(JSON)      → 201 {ok}
-   (추가) POST {base}/push/test  → 구독자에게 테스트 푸시(운영 확인용)              */
+   (추가) POST {base}/push/test  → 구독자에게 테스트 푸시(운영 확인용)
+     {base}/cal/...              외주 일감 캘린더(2026-09-28) — ★암호로 잠김(X-Cal-Token). 계약 정본 = src/cal.js 머리 주석 */
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
@@ -32,6 +33,7 @@ const config = require('./config');
 const push = require('./push');
 const runner = require('./agent/runner');
 const reclaim = require('./reclaim');
+const cal = require('./cal');
 
 function genId(prefix) {
   // 시간순 정렬 가능한 짧은 ID (crypto 난수 6바이트)
@@ -696,6 +698,9 @@ function buildRouter(store) {
     });
     res.json({ ok: true, result });
   });
+
+  // ---- 외주 일감 캘린더(2026-09-28) — 금액 정보라 이 경로만 암호로 잠근다. 규칙·계약 = src/cal.js ----
+  cal.attach(r, store, { requireAdmin });
 
   return r;
 }

@@ -16,6 +16,9 @@ data/*.json
 # 업로드된 1회용 참고문서(외주 첨부) — 처리 후 삭제, 절대 커밋 금지
 data/uploads/
 
+# 외주 일감 캘린더 일일 스냅샷(단가·수입 = 금액 정보) — 서버에만, 절대 커밋 금지
+data/cal-history/
+
 # 로그
 *.log
 npm-debug.log*

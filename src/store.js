@@ -101,6 +101,11 @@ function initStore(dataDir) {
     // 왜: 인플루언서 토픽은 블로그 글과 «별개 출처»로 AI 브리핑에 인용된다(2026-09-13 실검색). 봄딩 토픽 0개라
     // 잊히지 않게 체크만 남긴다. hidden·mpub 과 같은 집합형.
     topic: createCollection(dataDir, 'topic'),
+    // 외주 일감 캘린더(cal) — 봄딩·영도의 외주 일감(날짜·게임·외주업체·단가·완료). 2026-09-28 신설.
+    // ★금액 정보라 다른 공유 상태와 달리 암호(토큰)로 잠근다 — 규칙·계약은 src/cal.js 머리 주석이 정본.
+    cal: createCollection(dataDir, 'cal'),
+    // 캘린더 암호(scrypt 해시)와 기억한 기기 토큰(sha256)들 — 단일 레코드(id:'auth'). 평문 암호·토큰은 저장하지 않는다.
+    calAuth: createCollection(dataDir, 'cal-auth'),
   };
 }
 

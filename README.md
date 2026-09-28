@@ -22,8 +22,19 @@ GCP **e2-micro** 우분투 VM(1GB RAM)에 배포하는 가벼운 백엔드.
 | `POST {base}/requests/:id/status` 상태 갱신(관리자) → published 시 푸시 | ✅ 동작(ADMIN_TOKEN 필요) |
 | `POST {base}/requests/reclaim` stale `processing` 즉시 회수(관리자) | ✅ 동작(ADMIN_TOKEN 필요) |
 | `POST {base}/push/test` 테스트 푸시(관리자) | ✅ 동작(ADMIN_TOKEN 필요) |
+| `{base}/cal/...` 외주 일감 캘린더(봄딩·영도) — **암호로 잠김** (2026-09-28) | ✅ 동작(아래 절) |
 
 `{base}` = `PUBLISH_API_BASE_URL` (= 서버주소 + `BASE_PATH`). PWA `api.js` 와 동일 계약.
+
+### 외주 일감 캘린더 `/cal` (2026-09-28) — 사이트 「캘린더」 탭
+봄딩·영도 각자의 외주 일감(날짜·게임·외주업체·단가·완료·메모)을 담는 원장. 월·연 수입(3.3% 원천징수 제외)은 사이트가 계산한다.
+**계약·규칙의 정본은 `src/cal.js` 머리 주석**이고, 여기엔 운영에 필요한 것만 적는다.
+- ★**이 경로만 암호로 잠근다** — 단가·수입은 금액 정보인데, 이 서버 주소는 공개 사이트 코드·공개 저장소·공개 인증서 로그(crt.sh)에 이미 실려 있어 «숨기기»로는 못 막는다. 다른 공유 상태(`/hidden`·`/mpub`·`/why`…)는 그대로 토큰 없음.
+- 암호는 **하나**(두 달력 공용). 사이트에서 처음 연 사람이 정한다(`POST /cal/auth/setup`, 6~64자). 서버엔 scrypt 해시만, 기기엔 토큰만(최대 20대 기억, 넘으면 오래된 기기부터 잠김). 로그인 실패 IP당 15분 8회.
+- 인증 헤더 = `X-Cal-Token`(사이트) 또는 `X-Admin-Token`(관리자). **암호를 잊으면** 관리자 `POST /cal/auth/reset` — 암호·토큰만 지우고 **원장은 그대로**다(다음에 연 사람이 새로 정한다).
+- 고치기·지우기는 판(`base` = 그 일감의 `updatedAt`)을 같이 보낸다 — 다른 기기가 먼저 고쳤으면 **409 + 최신 판**(조용한 덮어쓰기 방지).
+- 백업: 그날 첫 쓰기 직전 원장 전체를 `data/cal-history/cal-YYYY-MM-DD.json`(KST) 으로 떠 둔다(90일). 전체 내보내기 = 관리자 `GET /cal/export`.
+- 시험: `npm run test:cal`(임시 데이터 디렉터리 · 49항목 · 동시 쓰기 25건 유실 0 포함).
 
 ### 2b 아키텍처(Option 2) — VM은 "큐", 작성·발행은 외부 러너
 VM 백엔드는 **요청을 받아 큐에 저장(`received`)** 하고 24시간 떠 있는다.
@@ -62,6 +73,7 @@ blog-company-backend/
 │  ├─ config.js        .env → config
 │  ├─ store.js         JSON 파일 스토어(원자적 쓰기)
 │  ├─ routes.js        API 라우트(계약 1:1)
+│  ├─ cal.js           외주 일감 캘린더 /cal (암호 잠금 · 2026-09-28)
 │  ├─ push.js          웹푸시(VAPID) 발송/구독정리
 │  ├─ pipeline.js      러너+푸시+store 오케스트레이션
 │  ├─ scheduler.js     node-cron 2시간 골격
@@ -197,6 +209,7 @@ window.BC_CONFIG = {
 ---
 
 ## 7. 보안
-- 실제 키는 **`.env` 에만**. `.gitignore` 로 `.env`, `data/*.json` 제외됨.
+- 실제 키는 **`.env` 에만**. `.gitignore` 로 `.env`, `data/*.json`, `data/cal-history/` 제외됨.
+- 캘린더(`/cal`)의 단가·수입은 서버 `data/` 에만 있다 — 저장소에 예시로라도 실금액을 적지 않는다.
 - VAPID **PRIVATE** 키와 `ANTHROPIC_API_KEY`/`GITHUB_TOKEN` 은 깃/채팅/로그 어디에도 남기지 말 것.
 - VAPID **PUBLIC** 키는 공개되어도 안전(브라우저에 노출되는 값).
