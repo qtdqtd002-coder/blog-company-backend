@@ -88,6 +88,9 @@ function initStore(dataDir) {
     // PC의 daily-topic-desk 스킬이 회차 시작 때 GET /pins 로 읽어 그 게임마다 주제 3~5개를 만든다.
     // 목록형(hidden·mpub)이 아니라 '순서 있는 전체 교체'라 컬렉션에 레코드 1개만 둔다(최대 8종).
     pins: createCollection(dataDir, 'pins'),
+    // 업데이트 챙길 게임(watch) — pins 의 서브 주제 짝(2026-10-25). 업데이트가 있을 때만 데스크가 정리·공략을 낸다.
+    // pins 와 같은 계약(단일 레코드 id:'watch' · 순서 있는 전체 교체 · 최대 8종). 규칙 정본 = routes.js «watch» 머리 주석.
+    watch: createCollection(dataDir, 'watch'),
     // 점검(maintenance) 플래그 — 단일 레코드(id:'maint'). PC의 쓰담 스킬 수정 잠금(.bc-locks)이
     // 활성일 때 on-skill-edit 훅이 POST /maintenance 로 켠다. TTL(기본 10분) 지나면 GET에서 자동 꺼짐.
     // 앱·사이트 '작업 큐'가 GET /maintenance 로 읽어 "점검 중 — 발행 일시 중단" 배너를 띄운다.

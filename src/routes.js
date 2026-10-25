@@ -313,7 +313,8 @@ function buildRouter(store) {
   // 배열을 '저장 가능한 최종 상태'로 정규화 — 공백 정리 → 빈값 제거 → 중복 제거(공백 무시 비교) → 상한 절단.
   // ★중복 판정에서 공백을 지우는 이유: '두근두근 타운'과 '두근두근타운'이 따로 저장되면
   //   데스크가 같은 게임을 두 번 조사한다(핀 8칸을 낭비).
-  function normPins(v) {
+  function normPins(v, max) {
+    const cap = max || PINS_MAX;
     const arr = Array.isArray(v) ? v : [];
     const out = [];
     const seen = new Set();
@@ -324,7 +325,7 @@ function buildRouter(store) {
       if (seen.has(key)) continue;
       seen.add(key);
       out.push(name);
-      if (out.length >= PINS_MAX) break;
+      if (out.length >= cap) break;
     }
     return out;
   }
@@ -356,6 +357,41 @@ function buildRouter(store) {
       updatedAt: Date.now(),
     });
     res.status(201).json(Object.assign({ ok: true }, pinsState()));
+  });
+
+  // ====================================================================
+  //  업데이트 챙길 게임(watch) — 2026-10-25 사용자 지시. 꼭 다룰 게임(pins)의 «서브 주제» 짝.
+  //  pins = 매 회차 반드시 주제를 뽑는 메인 목록 · watch = **업데이트가 있을 때만** 정리 1~2편 + 공략 최대 5편.
+  //  업데이트가 없으면 0건이 정상이다(억지로 채우지 않는다) — 판정·조사는 PC 데스크 스킬([A-0b])의 몫.
+  //  계약은 /pins 와 같다: 토큰 불필요 · 순서 있는 목록 전체 교체 · 레코드 1개(id:'watch') · 최대 8종.
+  //  두 목록에 같은 게임이 있으면 데스크가 pins 쪽만 쓴다(사이트가 추가 단계에서 막는다 — 서버는 막지 않는다).
+  // ====================================================================
+  const WATCH_MAX = 8;
+
+  function watchState() {
+    const rec = store.watch.find((x) => x.id === 'watch');
+    return {
+      games: (rec && Array.isArray(rec.games)) ? rec.games : [],
+      max: WATCH_MAX,
+      updatedAt: (rec && rec.updatedAt) || null,
+    };
+  }
+
+  r.get('/watch', (req, res) => res.json(watchState()));
+
+  r.post('/watch', async (req, res) => {
+    const body = req.body || {};
+    if (!Array.isArray(body.games)) {
+      return res.status(400).json({ error: 'games(게임 이름 배열)는 필수입니다.' });
+    }
+    const games = normPins(body.games, WATCH_MAX);
+    await store.watch.upsertBy((x) => x.id, {
+      id: 'watch',
+      games,
+      source: (body.source || 'web').toString().slice(0, 32),
+      updatedAt: Date.now(),
+    });
+    res.status(201).json(Object.assign({ ok: true }, watchState()));
   });
 
   // ====================================================================
