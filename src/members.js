@@ -92,6 +92,7 @@ const POLICY = [
   ['GET', /^\/cal\/auth$/, 'open'],
   ['*', /^\/cal\/me(\/|$)/, 'member', true],
   ['GET', /^\/cal\/(list|c\/[^/]+)$/, 'admin', true],
+  ['*', /^\/cal\/c\/[^/]+\/[^/]+$/, 'admin', true],
   ['*', /^\/cal(\/|$)/, 'admin'],                       // 옛 공용 달력(/cal/bomding …)·관리자 열람
   ['GET', /^\/requests$/, 'member'],                    // member 는 빈 목록(발주 없음) — 라우트가 거른다
   ['POST', /^\/requests$/, 'writer'],

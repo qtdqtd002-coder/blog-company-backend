@@ -282,6 +282,19 @@ function attach(r, store, deps) {
     if (!CAL_ID_RE.test(c)) return res.status(404).json({ error: '없는 달력: ' + c });
     res.json({ calId: c, entries: entriesOf(c) });
   });
+  /* 관리자가 다른 계정 달력을 고친다(사이트 캘린더 탭에서 그 달력을 골랐을 때 · 11-23). 역할 표에서 관리자·항상 강제. */
+  r.put('/cal/c/:calId/:id', async (req, res) => {
+    const c = String(req.params.calId || '');
+    if (!CAL_ID_RE.test(c)) return res.status(404).json({ error: '없는 달력: ' + c });
+    const out = await putEntry(c, String(req.params.id || ''), req.body || {});
+    res.status(out.code).json(out.body);
+  });
+  r.delete('/cal/c/:calId/:id', async (req, res) => {
+    const c = String(req.params.calId || '');
+    if (!CAL_ID_RE.test(c)) return res.status(404).json({ error: '없는 달력: ' + c });
+    const out = await delEntry(c, String(req.params.id || ''), req.query.base);
+    res.status(out.code).json(out.body);
+  });
 
   /* ── 옛 공용 경로(09-28 · 캘린더 암호) — 사이트가 /cal/me 로 옮겨 갈 때까지 둔다. 강제 모드에선 관리자만(members POLICY). ── */
   r.get('/cal/:writer', calAuth, (req, res) => {

@@ -224,6 +224,14 @@ function chk(name, ok, got) {
     chk('운영자가 회원 달력 열람', r.s === 200 && r.j.entries.length === 1, r);
     r = await call('GET', '/cal/c/u:bobby', undefined, T(ALICE));
     chk('작성자 계정이 남의 달력 열람 = 403', r.s === 403, r);
+    r = await call('PUT', '/cal/c/u:bobby/admin-entry-01', { date: '2026-11-24', game: '관리자가 넣음', agency: 'Q' }, T(BOSS));
+    chk('운영자가 회원 달력에 쓰기 = 201', r.s === 201, r);
+    r = await call('PUT', '/cal/c/u:bobby/admin-entry-02', { date: '2026-11-24', game: 'x', agency: 'Q' }, T(ALICE));
+    chk('작성자 계정이 남의 달력에 쓰기 = 403', r.s === 403, r);
+    r = await call('DELETE', '/cal/c/u:bobby/admin-entry-01', undefined, T(BOSS));
+    chk('운영자가 회원 달력 일감 지우기 = 200', r.s === 200, r);
+    r = await call('PUT', '/cal/c/u:bobby/anon-entry-01', { date: '2026-11-24', game: 'x', agency: 'Q' });
+    chk('★비로그인 남의 달력 쓰기 = 401(관찰 모드 무관)', r.s === 401, r);
 
     /* ── 푸시 범위 ── */
     r = await call('POST', '/push/subscribe', { endpoint: 'https://push.example/bobby', keys: {} }, T(BOBBY));
