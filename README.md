@@ -213,3 +213,16 @@ window.BC_CONFIG = {
 - 캘린더(`/cal`)의 단가·수입은 서버 `data/` 에만 있다 — 저장소에 예시로라도 실금액을 적지 않는다.
 - VAPID **PRIVATE** 키와 `ANTHROPIC_API_KEY`/`GITHUB_TOKEN` 은 깃/채팅/로그 어디에도 남기지 말 것.
 - VAPID **PUBLIC** 키는 공개되어도 안전(브라우저에 노출되는 값).
+
+---
+
+## 8. 회원·역할 (2026-11-23 · v0.6.0)
+사이트를 외부에 공유하면서 «가입 → 관리자 승인 → 로그인» 계정을 두고 모든 경로를 역할로 지킨다. **계약·규칙 정본 = `src/members.js` 머리 주석**(역할 표 `POLICY` 포함).
+- 역할: `admin`(운영자 · PC 의 `X-Admin-Token` 도 admin) · `writer`(작성자 이름이 붙은 블로거 — 자기 작성자 요청·글 상태만) · `member`(일반 회원 — 트렌드·도구함·자기 캘린더 · **발주 불가**).
+- 인증 = 헤더 `X-Auth-Token` 또는 쿠키 `sd_auth`(HttpOnly). 서버엔 scrypt 해시·토큰 sha256 만.
+- 가입 정보(이름·연락처·사유)는 **PC 가 가져갈 때까지만** 서버에 있다 — `GET /auth/admin/pii` → PC 원장 → `POST /auth/admin/pii/ack`.
+- 꼭 다룰 게임·업데이트 챙길 게임: 관리자가 아니면 자기가 넣은 것 **최대 3개씩**(전체 8 그대로).
+- 캘린더: **계정별**(`/cal/me`). 작성자 계정은 옛 키(bomding·yeongdo) 일감을 그대로 이어받는다. 옛 공용 경로(`/cal/:writer` + 캘린더 암호)는 전환 기간용.
+- **관찰 모드(기본)** — 막지 않고 «토큰 없이 부른 곳»만 센다(`GET /auth/admin/audit`). 전부 토큰을 보내는 걸 확인한 뒤 `POST /auth/admin/enforce {on:true}`(관리자 토큰)로 켠다. `{on:false}` 면 즉시 되돌아간다.
+- 첫 운영자 계정: `POST /auth/admin/users {username, password, nick, role:'admin'}`(관리자 토큰).
+- 시험: `npm run test:auth`(83항목 · 임시 폴더 · 운영 데이터 무관).

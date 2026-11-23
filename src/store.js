@@ -109,6 +109,11 @@ function initStore(dataDir) {
     cal: createCollection(dataDir, 'cal'),
     // 캘린더 암호(scrypt 해시)와 기억한 기기 토큰(sha256)들 — 단일 레코드(id:'auth'). 평문 암호·토큰은 저장하지 않는다.
     calAuth: createCollection(dataDir, 'cal-auth'),
+    // 회원(users) — 2026-11-23. 아이디(id)·닉네임·역할·작성자·상태·scrypt 해시·기기 토큰 sha256.
+    // 가입 정보(이름·연락처·사유 = pii)는 PC 가 가져갈 때까지만 둔다. 규칙·계약 = src/members.js 머리 주석.
+    users: createCollection(dataDir, 'users'),
+    // 회원 설정(authCfg) — 단일 레코드(id:'cfg') {enforce}. 강제 모드를 재시작 너머로 유지한다.
+    authCfg: createCollection(dataDir, 'auth-cfg'),
   };
 }
 

@@ -20,6 +20,14 @@
                                                    → 201(새로)·200(고침) {ok, entry} | 409 {error, entry}
      DELETE {base}/cal/:writer/:id?base=<updatedAt> → 200 {ok} | 404 | 409
 
+   ★2026-11-23 계정별 달력(사용자 결정 «공용 자산이 아니라 계정마다») — 로그인(src/members.js)이 곧 잠금:
+     GET    {base}/cal/me                 → {calId, name, entries}   로그인한 계정의 달력
+     PUT    {base}/cal/me/:id  {…위와 같음}  · DELETE {base}/cal/me/:id?base=
+     GET    {base}/cal/list   (관리자)     → {calendars:[{calId, owner, name, count}]}
+     GET    {base}/cal/c/:calId (관리자)   → {calId, entries}
+     calId = 작성자 계정이면 옛 키(bomding·yeongdo → 그동안의 일감이 그 계정 것) · 그 밖은 'u:<아이디>'.
+     위의 옛 공용 경로(/cal/:writer + 캘린더 암호)는 사이트가 옮겨 갈 때까지만 둔다(강제 모드에선 관리자만).
+
    동시성: 기기 두 대가 같은 일감을 고치면 «나중에 도착한 쪽»이 조용히 덮는 게 가장 나쁜 실패다
      (연봄하우스 2026-08-16 기록 유실과 같은 종류 — 오류 0, 그냥 사라진다). 그래서 고칠 때는 클라이언트가
      자기가 본 판(base = updatedAt)을 같이 보내고, 서버의 판이 그새 바뀌었으면 409 + 최신 판을 돌려준다.
@@ -225,25 +233,77 @@ function attach(r, store, deps) {
     done: !!x.done, memo: x.memo || '', createdAt: x.createdAt || null, updatedAt: x.updatedAt || null,
   });
 
+  const entriesOf = (w) => store.cal.all().filter((x) => x.writer === w).map(pub)
+    .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt || 0) - (b.createdAt || 0)));
+
+  /* ── 계정별 달력(2026-11-23 · 사용자 결정 «공용 자산이 아니라 계정마다») ──
+     달력 id(calId) = 작성자 계정이면 그 작성자의 옛 키(봄딩→bomding · 영도→yeongdo — 09-28 부터 쌓인 일감이 그대로 그 계정 것이 된다),
+     그 밖의 계정은 'u:<아이디>'. 로그인이 곧 잠금이라 이 경로엔 캘린더 암호가 없다(옛 공용 경로 /cal/bomding … 은 전환 기간용).
+     관리자는 모든 달력을 읽는다(GET /cal/list · /cal/c/:calId). 원장 필드 writer 에 calId 를 그대로 담는다(이전 작업 0). */
+  const KEY_OF_WRITER = {}; Object.keys(WRITERS).forEach((k) => { KEY_OF_WRITER[WRITERS[k]] = k; });
+  const CAL_ID_RE = /^(bomding|yeongdo|u:[a-z0-9_]{4,20})$/;
+  function calIdOfWho(who) {
+    if (!who || who.via !== 'user') return null;
+    if (who.role === 'writer' && who.writer && KEY_OF_WRITER[who.writer]) return KEY_OF_WRITER[who.writer];
+    return 'u:' + who.id;
+  }
+  function needMyCal(req, res) {
+    const c = calIdOfWho(req.who);
+    if (!c) { res.status(401).json({ error: '로그인한 계정의 달력만 열 수 있습니다.', code: 'login' }); return null; }
+    return c;
+  }
+  r.get('/cal/me', (req, res) => {
+    const c = needMyCal(req, res); if (!c) return;
+    res.json({ calId: c, name: req.who.nick, entries: entriesOf(c) });
+  });
+  r.put('/cal/me/:id', async (req, res) => {
+    const c = needMyCal(req, res); if (!c) return;
+    const out = await putEntry(c, String(req.params.id || ''), req.body || {});
+    res.status(out.code).json(out.body);
+  });
+  r.delete('/cal/me/:id', async (req, res) => {
+    const c = needMyCal(req, res); if (!c) return;
+    const out = await delEntry(c, String(req.params.id || ''), req.query.base);
+    res.status(out.code).json(out.body);
+  });
+  r.get('/cal/list', (req, res) => {
+    const counts = {};
+    store.cal.all().forEach((x) => { counts[x.writer] = (counts[x.writer] || 0) + 1; });
+    const owners = {};
+    (store.users ? store.users.all() : []).filter((u) => u.status === 'active').forEach((u) => {
+      const c = calIdOfWho({ via: 'user', id: u.id, role: u.role, writer: u.writer });
+      if (c) owners[c] = { id: u.id, nick: u.nick, role: u.role, writer: u.writer || null };
+    });
+    const ids = Array.from(new Set(Object.keys(counts).concat(Object.keys(owners)))).sort();
+    res.json({ calendars: ids.map((c) => ({ calId: c, owner: owners[c] || null, name: owners[c] ? owners[c].nick : (WRITERS[c] || c), count: counts[c] || 0 })) });
+  });
+  r.get('/cal/c/:calId', (req, res) => {
+    const c = String(req.params.calId || '');
+    if (!CAL_ID_RE.test(c)) return res.status(404).json({ error: '없는 달력: ' + c });
+    res.json({ calId: c, entries: entriesOf(c) });
+  });
+
+  /* ── 옛 공용 경로(09-28 · 캘린더 암호) — 사이트가 /cal/me 로 옮겨 갈 때까지 둔다. 강제 모드에선 관리자만(members POLICY). ── */
   r.get('/cal/:writer', calAuth, (req, res) => {
     const w = writerOf(req, res); if (!w) return;
-    const entries = store.cal.all().filter((x) => x.writer === w).map(pub)
-      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt || 0) - (b.createdAt || 0)));
-    res.json({ writer: w, name: WRITERS[w], entries });
+    res.json({ writer: w, name: WRITERS[w], entries: entriesOf(w) });
   });
 
   r.put('/cal/:writer/:id', calAuth, async (req, res) => {
     const w = writerOf(req, res); if (!w) return;
-    const id = String(req.params.id || '');
-    if (!ID_RE.test(id)) return res.status(400).json({ error: 'id 형식이 잘못됐습니다.' });
-    const b = req.body || {};
+    const out = await putEntry(w, String(req.params.id || ''), req.body || {});
+    res.status(out.code).json(out.body);
+  });
+
+  async function putEntry(w, id, b) {
+    if (!ID_RE.test(id)) return { code: 400, body: { error: 'id 형식이 잘못됐습니다.' } };
     const date = cleanDate(b.date);
-    if (!date) return res.status(400).json({ error: '날짜(YYYY-MM-DD)가 잘못됐습니다.' });
+    if (!date) return { code: 400, body: { error: '날짜(YYYY-MM-DD)가 잘못됐습니다.' } };
     const game = cleanStr(b.game, LEN.game);
     const agency = cleanStr(b.agency, LEN.agency);
-    if (!game && !agency) return res.status(400).json({ error: '게임 이름이나 외주업체 중 하나는 적어야 합니다.' });
+    if (!game && !agency) return { code: 400, body: { error: '게임 이름이나 외주업체 중 하나는 적어야 합니다.' } };
     const price = cleanPrice(b.price);
-    if (price === undefined) return res.status(400).json({ error: '단가는 0 이상 ' + PRICE_MAX.toLocaleString('ko-KR') + '원 이하의 정수로 적으세요.' });
+    if (price === undefined) return { code: 400, body: { error: '단가는 0 이상 ' + PRICE_MAX.toLocaleString('ko-KR') + '원 이하의 정수로 적으세요.' } };
     const memo = cleanStr(b.memo, LEN.memo);
     const hasBase = b.base !== undefined && b.base !== null && b.base !== '';
 
@@ -267,14 +327,17 @@ function attach(r, store, deps) {
       else await store.cal.insert(rec);
       return { code: cur ? 200 : 201, body: { ok: true, entry: pub(rec) } };
     });
-    res.status(out.code).json(out.body);
-  });
+    return out;
+  }
 
   r.delete('/cal/:writer/:id', calAuth, async (req, res) => {
     const w = writerOf(req, res); if (!w) return;
-    const id = String(req.params.id || '');
-    const base = req.query.base;
-    const out = await serial(async () => {
+    const out = await delEntry(w, String(req.params.id || ''), req.query.base);
+    res.status(out.code).json(out.body);
+  });
+
+  async function delEntry(w, id, base) {
+    return serial(async () => {
       const cur = store.cal.find((x) => x.id === id && x.writer === w);
       if (!cur) return { code: 404, body: { error: '없는 일감입니다.' } };
       if (base !== undefined && base !== '' && Number(base) !== cur.updatedAt) {
@@ -284,8 +347,7 @@ function attach(r, store, deps) {
       await store.cal.removeBy((x) => x.id === id && x.writer === w);
       return { code: 200, body: { ok: true, id } };
     });
-    res.status(out.code).json(out.body);
-  });
+  }
 }
 
 module.exports = { attach, WRITERS, cleanDate, cleanPrice };

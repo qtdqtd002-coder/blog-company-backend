@@ -34,6 +34,7 @@ const push = require('./push');
 const runner = require('./agent/runner');
 const reclaim = require('./reclaim');
 const cal = require('./cal');
+const members = require('./members');
 
 function genId(prefix) {
   // 시간순 정렬 가능한 짧은 ID (crypto 난수 6바이트)
@@ -118,6 +119,49 @@ function buildRouter(store) {
     next();
   }
 
+  // ====================================================================
+  //  회원·역할(2026-11-23) — 모든 경로 앞에서 req.who(누구인가)를 붙이고 역할 표로 문을 지킨다.
+  //  관찰 모드에선 막지 않고 센다. 규칙·계약 정본 = src/members.js 머리 주석.
+  //  ★«자기 범위»(작성자 W 는 W 의 요청·글 상태만)는 아래 각 라우트가 scopeOf/relAllowed 로 본다.
+  // ====================================================================
+  const ACCOUNT_WRITERS = runner.WRITERS.filter((w) => !runner.INACTIVE_WRITERS.includes(w));
+  const mem = members.create(store);
+  r.use(mem.gate);
+  mem.attach(r, { requireAdmin, writers: ACCOUNT_WRITERS });
+
+  /* 요청자의 데이터 범위: null = 전부(관리자 · 관찰 모드의 비로그인 = 옛 동작 유지) · '작성자 이름' = 그 작성자만 · '' = 없음(일반 회원) */
+  function scopeOf(req) {
+    const w = req.who;
+    if (!w) return null;
+    if (w.role === 'admin') return null;
+    if (w.role === 'writer' && w.writer) return w.writer;
+    return '';
+  }
+  /* 글 rel 은 «작성자/게임/주제/» 꼴 — 맨 앞 조각이 작성자다. */
+  function relWriter(rel) { return String(rel || '').split('/')[0]; }
+  function relAllowed(req, rel) {
+    const s = scopeOf(req);
+    return s === null || (s !== '' && relWriter(rel) === s);
+  }
+  function denyScope(res) { return res.status(403).json({ error: '자기 글만 바꿀 수 있습니다.', code: 'scope' }); }
+  const relsFor = (req, coll) => coll.all().map((x) => x.rel).filter(Boolean).filter((rel) => relAllowed(req, rel));
+
+  /* 요청 상태 알림 받을 구독 — 관리자 · 그 요청의 작성자 계정 · 계정 없는 옛 구독(2026-11-23 이전 팀 기기). 일반 회원은 받지 않는다. */
+  function pushFilterFor(reqRec) {
+    return (sub) => {
+      if (!sub.uid) return true;
+      const u = mem.userById(sub.uid);
+      if (!u || u.status !== 'active') return false;
+      if (u.role === 'admin') return true;
+      return u.role === 'writer' && !!u.writer && u.writer === (reqRec && reqRec.writer);
+    };
+  }
+  const adminOnlyPush = (sub) => {
+    if (!sub.uid) return true;
+    const u = mem.userById(sub.uid);
+    return !!(u && u.status === 'active' && u.role === 'admin');
+  };
+
   // ---- 헬스체크 ----
   r.get('/health', (req, res) => {
     const reqs = store.requests.all();
@@ -134,6 +178,7 @@ function buildRouter(store) {
       mode: 'queue', // 2b Option 2: VM은 큐(접수)만, 작성·발행은 외부 러너
       push: push.isEnabled(),
       adminConfigured: !!config.adminToken,
+      auth: { enforce: mem.enforceOn() },
       counts: {
         requests: reqs.length,
         subscriptions: store.subscriptions.all().length,
@@ -149,6 +194,9 @@ function buildRouter(store) {
     let list = store.requests.all().sort((a, b) => b.createdAt - a.createdAt);
     const status = (req.query.status || '').toString().trim();
     if (status) list = list.filter((x) => x.status === status);
+    // ★계정 범위(2026-11-23): 작성자 계정은 자기 작성자 요청만 · 일반 회원은 빈 목록(발주가 없다) · 관리자는 전부.
+    const scope = scopeOf(req);
+    if (scope !== null) list = scope === '' ? [] : list.filter((x) => x.writer === scope);
     res.json(list);
   });
 
@@ -167,6 +215,14 @@ function buildRouter(store) {
     if (writer && !runner.WRITERS.includes(writer)) {
       writer = ''; // 알 수 없는 작성자는 미지정 처리(거부하지 않음)
     }
+    // ★계정 범위(2026-11-23): 일반 회원은 발주 불가(그 사람 문체로 쓸 작성자 등록 전 — 사용자 결정) ·
+    //   작성자 계정은 자기 작성자로 고정(다른 작성자 이름을 보내도 바꾼다 — 남의 블로그에 글이 올라가지 않게).
+    const scope = scopeOf(req);
+    if (scope === '') {
+      files.forEach((f) => deleteAttachmentFile(f.filename));
+      return res.status(403).json({ error: '작성자로 등록된 계정만 글을 요청할 수 있어요.', code: 'no-writer' });
+    }
+    if (scope) writer = scope;
     // ★휴면 작성자(2026-08-14 겜더쿠·연봄 · 2026-09-02 하루살이): 발행을 중단했다. 조용히 다른 작성자로 바꾸지 않고 명시적으로 거절한다
     // (자동 배정으로 넘기면 요청자가 원하지 않은 블로그에 글이 올라간다).
     if (writer && runner.INACTIVE_WRITERS.includes(writer)) {
@@ -187,6 +243,7 @@ function buildRouter(store) {
       createdAt: Date.now(),
       source: (body.source || 'pwa').toString().slice(0, 32),
     };
+    if (req.who && req.who.via === 'user') { rec.uid = req.who.id; rec.byNick = req.who.nick; }
     // 첨부(외주 1회용 참고문서) — 메타만 기록, 파일은 uploads/ 에. 작성 러너가 받아 '이 글에만' 반영.
     // ★2026-09-05: 최대 5개. attachments[] 가 정본, attachment 는 첫 파일(옛 클라이언트·러너 호환).
     if (files.length) {
@@ -219,7 +276,7 @@ function buildRouter(store) {
 
   // 현재 숨김 rel 목록(문자열 배열) — 사이트·PWA 가 로드 시 호출.
   r.get('/hidden', (req, res) => {
-    const rels = store.hidden.all().map((x) => x.rel).filter(Boolean);
+    const rels = relsFor(req, store.hidden);
     res.json({ rels });
   });
 
@@ -228,6 +285,7 @@ function buildRouter(store) {
     const body = req.body || {};
     const rel = cleanRel(body.rel);
     if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    if (!relAllowed(req, rel)) return denyScope(res);
     const exists = store.hidden.find((x) => x.rel === rel);
     if (!exists) {
       if (store.hidden.all().length >= HIDDEN_MAX) {
@@ -241,7 +299,7 @@ function buildRouter(store) {
         hiddenAt: Date.now(),
       });
     }
-    const rels = store.hidden.all().map((x) => x.rel).filter(Boolean);
+    const rels = relsFor(req, store.hidden);
     res.status(201).json({ ok: true, rel, already: !!exists, rels });
   });
 
@@ -249,8 +307,9 @@ function buildRouter(store) {
   r.post('/hidden/unhide', async (req, res) => {
     const rel = cleanRel((req.body || {}).rel);
     if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    if (!relAllowed(req, rel)) return denyScope(res);
     const removed = await store.hidden.removeBy((x) => x.rel === rel);
-    const rels = store.hidden.all().map((x) => x.rel).filter(Boolean);
+    const rels = relsFor(req, store.hidden);
     res.json({ ok: true, rel, removed, rels });
   });
 
@@ -263,7 +322,7 @@ function buildRouter(store) {
 
   // 현재 수동 발행완료 rel 목록 — 사이트·PWA 가 로드 시 호출.
   r.get('/mpub', (req, res) => {
-    const rels = store.mpub.all().map((x) => x.rel).filter(Boolean);
+    const rels = relsFor(req, store.mpub);
     res.json({ rels });
   });
 
@@ -272,6 +331,7 @@ function buildRouter(store) {
     const body = req.body || {};
     const rel = cleanRel(body.rel);
     if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    if (!relAllowed(req, rel)) return denyScope(res);
     const exists = store.mpub.find((x) => x.rel === rel);
     if (!exists) {
       if (store.mpub.all().length >= MPUB_MAX) {
@@ -285,7 +345,7 @@ function buildRouter(store) {
         markedAt: Date.now(),
       });
     }
-    const rels = store.mpub.all().map((x) => x.rel).filter(Boolean);
+    const rels = relsFor(req, store.mpub);
     res.status(201).json({ ok: true, rel, already: !!exists, rels });
   });
 
@@ -293,8 +353,9 @@ function buildRouter(store) {
   r.post('/mpub/unpub', async (req, res) => {
     const rel = cleanRel((req.body || {}).rel);
     if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    if (!relAllowed(req, rel)) return denyScope(res);
     const removed = await store.mpub.removeBy((x) => x.rel === rel);
-    const rels = store.mpub.all().map((x) => x.rel).filter(Boolean);
+    const rels = relsFor(req, store.mpub);
     res.json({ ok: true, rel, removed, rels });
   });
 
@@ -330,11 +391,72 @@ function buildRouter(store) {
     return out;
   }
 
+  /* ★계정별 지정(2026-11-23 · 사용자 결정): 관리자가 아니면 «자기가 넣은 게임» 최대 3개씩 · 남이 넣은 게임은 못 뺀다 ·
+     순서도 못 바꾼다(남은 것은 원래 순서, 새것은 뒤에). 그 이상은 관리자가 넣는다. 전체 상한(8)은 데스크 회차 비용 때문에 그대로.
+     owners = {게임 키(공백 제거·소문자): 넣은 계정 id} — 2026-11-23 이전 게임은 주인이 없어 관리자만 뺀다.
+     데스크(PC)가 읽는 계약 games:[...] 은 바뀌지 않는다. */
+  const LIST_PER_USER = 3;
+  const gameKey = (g) => String(g).replace(/s+/g, '').toLowerCase();
+  let listChain = Promise.resolve();
+  function serialList(fn) { const p = listChain.then(fn, fn); listChain = p.catch(() => {}); return p; }
+  function ownersOf(rec) {
+    const o = (rec && rec.owners) || {};
+    return ((rec && rec.games) || []).map((g) => {
+      const uid = o[gameKey(g)] || null;
+      const u = uid && uid !== '@admin' ? mem.userById(uid) : null;
+      return { game: g, by: uid, nick: u ? u.nick : (uid === '@admin' ? '관리자' : null) };
+    });
+  }
+  function saveOwnedList(coll, recId, max, req, body) {
+    return serialList(async () => {
+      const who = req.who;
+      const cur = coll.find((x) => x.id === recId) || {};
+      const oldG = Array.isArray(cur.games) ? cur.games : [];
+      const owners = Object.assign({}, cur.owners || {});
+      const isAdmin = !who || who.role === 'admin';          // 관찰 모드의 비로그인 = 옛 동작(전체 교체)
+      let finalG;
+      if (isAdmin) {
+        finalG = normPins(body.games, max);
+      } else {
+        const want = normPins(body.games, 1000);
+        const wantK = new Set(want.map(gameKey));
+        const oldK = new Set(oldG.map(gameKey));
+        for (const g of oldG) {
+          if (!wantK.has(gameKey(g)) && owners[gameKey(g)] !== who.id) {
+            return { code: 403, body: { error: "'" + g + "'은(는) 다른 사람이 넣은 게임이라 뺄 수 없어요.", code: 'not-owner', game: g } };
+          }
+        }
+        const added = want.filter((g) => !oldK.has(gameKey(g)));
+        const kept = oldG.filter((g) => wantK.has(gameKey(g)));
+        const mine = kept.filter((g) => owners[gameKey(g)] === who.id).length + added.length;
+        if (mine > LIST_PER_USER) {
+          return { code: 409, body: { error: '한 사람당 ' + LIST_PER_USER + '개까지 넣을 수 있어요. 더 필요하면 관리자에게 요청해 주세요.', code: 'per-user', perUser: LIST_PER_USER } };
+        }
+        finalG = kept.concat(added);
+        if (finalG.length > max) {
+          return { code: 409, body: { error: '목록이 가득 찼어요(최대 ' + max + '개). 관리자에게 요청해 주세요.', code: 'full', max } };
+        }
+      }
+      const finalK = new Set(finalG.map(gameKey));
+      const oldK2 = new Set(oldG.map(gameKey));
+      Object.keys(owners).forEach((k) => { if (!finalK.has(k)) delete owners[k]; });
+      finalG.forEach((g) => { if (!oldK2.has(gameKey(g)) && who) owners[gameKey(g)] = who.id; });
+      await coll.upsertBy((x) => x.id, {
+        id: recId, games: finalG, owners,
+        source: (body.source || 'web').toString().slice(0, 32),
+        updatedAt: Date.now(),
+      });
+      return { code: 201 };
+    });
+  }
+
   function pinsState() {
     const rec = store.pins.find((x) => x.id === 'pins');
     return {
       games: (rec && Array.isArray(rec.games)) ? rec.games : [],
       max: PINS_MAX,
+      perUser: LIST_PER_USER,
+      owners: ownersOf(rec),
       updatedAt: (rec && rec.updatedAt) || null,
     };
   }
@@ -349,13 +471,8 @@ function buildRouter(store) {
     if (!Array.isArray(body.games)) {
       return res.status(400).json({ error: 'games(게임 이름 배열)는 필수입니다.' });
     }
-    const games = normPins(body.games);
-    await store.pins.upsertBy((x) => x.id, {
-      id: 'pins',
-      games,
-      source: (body.source || 'web').toString().slice(0, 32),
-      updatedAt: Date.now(),
-    });
+    const out = await saveOwnedList(store.pins, 'pins', PINS_MAX, req, body);
+    if (out.code !== 201) return res.status(out.code).json(out.body);
     res.status(201).json(Object.assign({ ok: true }, pinsState()));
   });
 
@@ -373,6 +490,8 @@ function buildRouter(store) {
     return {
       games: (rec && Array.isArray(rec.games)) ? rec.games : [],
       max: WATCH_MAX,
+      perUser: LIST_PER_USER,
+      owners: ownersOf(rec),
       updatedAt: (rec && rec.updatedAt) || null,
     };
   }
@@ -384,13 +503,8 @@ function buildRouter(store) {
     if (!Array.isArray(body.games)) {
       return res.status(400).json({ error: 'games(게임 이름 배열)는 필수입니다.' });
     }
-    const games = normPins(body.games, WATCH_MAX);
-    await store.watch.upsertBy((x) => x.id, {
-      id: 'watch',
-      games,
-      source: (body.source || 'web').toString().slice(0, 32),
-      updatedAt: Date.now(),
-    });
+    const out = await saveOwnedList(store.watch, 'watch', WATCH_MAX, req, body);
+    if (out.code !== 201) return res.status(out.code).json(out.body);
     res.status(201).json(Object.assign({ ok: true }, watchState()));
   });
 
@@ -415,8 +529,9 @@ function buildRouter(store) {
     { id: 'notime',   label: '시간이 없었다',  fix: '붙여넣기 마찰 감소' },
   ];
   const WHY_IDS = WHY_REASONS.map((x) => x.id);
-  function whyState() {
+  function whyState(req) {
     const items = store.why.all()
+      .filter((x) => relAllowed(req, x.rel))
       .map((x) => ({ rel: x.rel, reason: x.reason, by: x.by || null, at: x.at || null }))
       .filter((x) => x.rel && x.reason);
     const counts = {};
@@ -425,7 +540,7 @@ function buildRouter(store) {
   }
 
   // 현재 사유 목록 + 사유 어휘 + 집계 — 사이트·PWA 가 로드 시 호출.
-  r.get('/why', (req, res) => res.json(whyState()));
+  r.get('/why', (req, res) => res.json(whyState(req)));
 
   // 사유 기록(덮어쓰기) — body { rel, reason, by? }. reason 이 목록 밖이면 400.
   r.post('/why', async (req, res) => {
@@ -433,6 +548,7 @@ function buildRouter(store) {
     const rel = cleanRel(body.rel);
     const reason = String(body.reason == null ? '' : body.reason).trim();
     if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    if (!relAllowed(req, rel)) return denyScope(res);
     if (WHY_IDS.indexOf(reason) < 0) {
       return res.status(400).json({ error: 'reason 은 다음 중 하나여야 합니다: ' + WHY_IDS.join(', ') });
     }
@@ -456,15 +572,16 @@ function buildRouter(store) {
         at: Date.now(),
       });
     }
-    res.status(201).json(Object.assign({ ok: true, rel, reason }, whyState()));
+    res.status(201).json(Object.assign({ ok: true, rel, reason }, whyState(req)));
   });
 
   // 사유 지우기 — body { rel }.
   r.post('/why/clear', async (req, res) => {
     const rel = cleanRel((req.body || {}).rel);
     if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    if (!relAllowed(req, rel)) return denyScope(res);
     const removed = await store.why.removeBy((x) => x.rel === rel);
-    res.json(Object.assign({ ok: true, rel, removed }, whyState()));
+    res.json(Object.assign({ ok: true, rel, removed }, whyState(req)));
   });
 
   // ====================================================================
@@ -475,7 +592,7 @@ function buildRouter(store) {
   const TOPIC_MAX = 5000;
 
   r.get('/topic', (req, res) => {
-    const rels = store.topic.all().map((x) => x.rel).filter(Boolean);
+    const rels = relsFor(req, store.topic);
     res.json({ rels });
   });
 
@@ -483,6 +600,7 @@ function buildRouter(store) {
     const body = req.body || {};
     const rel = cleanRel(body.rel);
     if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    if (!relAllowed(req, rel)) return denyScope(res);
     const exists = store.topic.find((x) => x.rel === rel);
     if (!exists) {
       if (store.topic.all().length >= TOPIC_MAX) {
@@ -496,15 +614,16 @@ function buildRouter(store) {
         at: Date.now(),
       });
     }
-    const rels = store.topic.all().map((x) => x.rel).filter(Boolean);
+    const rels = relsFor(req, store.topic);
     res.status(201).json({ ok: true, rel, already: !!exists, rels });
   });
 
   r.post('/topic/untopic', async (req, res) => {
     const rel = cleanRel((req.body || {}).rel);
     if (!rel) return res.status(400).json({ error: 'rel(글 경로)은 필수입니다.' });
+    if (!relAllowed(req, rel)) return denyScope(res);
     const removed = await store.topic.removeBy((x) => x.rel === rel);
-    const rels = store.topic.all().map((x) => x.rel).filter(Boolean);
+    const rels = relsFor(req, store.topic);
     res.json({ ok: true, rel, removed, rels });
   });
 
@@ -587,7 +706,7 @@ function buildRouter(store) {
         body: (who + (updated.title || updated.topic || '블로그 컴퍼니에 새 글이 올라왔어요.')).slice(0, 500),
         url: updated.publishUrl || './',
         tag: 'bc-published',
-      });
+      }, pushFilterFor(updated));
     } else if (status === 'failed' || status === 'skipped') {
       // 실패·스킵도 요청자에게 알린다 — 사유(error)가 유일한 피드백 채널이므로 본문에 싣는다.
       const reason = updated.error ? ` — ${updated.error}` : '';
@@ -596,7 +715,7 @@ function buildRouter(store) {
         body: `${who}"${updated.topic || updated.title || '요청'}"${reason}`.slice(0, 500),
         url: './',
         tag: 'bc-failed',
-      });
+      }, pushFilterFor(updated));
     }
     res.json({ ok: true, request: updated, push: pushResult });
   });
@@ -639,6 +758,8 @@ function buildRouter(store) {
     const id = req.params.id;
     const cur = store.requests.find((x) => x.id === id);
     if (!cur) return res.status(404).json({ error: '해당 id 요청 없음' });
+    const cScope = scopeOf(req);
+    if (cScope !== null && cur.writer !== cScope) return denyScope(res);
     if (cur.status !== 'received') {
       return res.status(409).json({ error: '이미 ' + cur.status + ' 상태라 취소할 수 없습니다(접수 대기 중인 요청만 취소 가능).', status: cur.status });
     }
@@ -707,6 +828,8 @@ function buildRouter(store) {
       subscription: sub,            // 원본 PushSubscription(JSON) 전체 보관
       createdAt: Date.now(),
       ua: (req.headers['user-agent'] || '').slice(0, 200),
+      // 누구 기기인가(2026-11-23) — 알림을 그 계정 범위에만 보낸다(pushFilterFor). 비로그인(관찰 모드)이면 null.
+      uid: req.who && req.who.via === 'user' ? req.who.id : null,
     };
     // endpoint 기준 upsert(중복 구독 방지)
     await store.subscriptions.upsertBy((x) => x.endpoint, rec);
@@ -731,7 +854,7 @@ function buildRouter(store) {
       body: (req.body && req.body.body) || '블로그 컴퍼니 백엔드 푸시 테스트입니다.',
       url: './',
       tag: 'bc-test',
-    });
+    }, adminOnlyPush);
     res.json({ ok: true, result });
   });
 

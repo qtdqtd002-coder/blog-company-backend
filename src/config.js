@@ -31,6 +31,12 @@ const config = {
   // 비어 있으면 해당 엔드포인트는 503(잠김). deploy.sh가 자동 발급.
   adminToken: process.env.ADMIN_TOKEN || '',
 
+  // 회원 역할 검사 강제(2026-11-23 · src/members.js). false(기본) = 관찰 모드 — 막지 않고 «토큰 없이 부른 곳»만 센다.
+  // true 면 강제로 고정(관리자 POST /auth/admin/enforce 로 끌 수 없다). 평소엔 비워 두고 그 엔드포인트로 켠다.
+  authEnforce: bool(process.env.AUTH_ENFORCE, false),
+  // 로그인 쿠키(sd_auth)에 Secure 를 붙인다 — 운영은 HTTPS(Caddy) 뒤라 기본 켬. 로컬 http 시험만 false.
+  cookieSecure: bool(process.env.COOKIE_SECURE, true),
+
   dataDir: path.join(__dirname, '..', 'data'),
   uploadDir: path.join(__dirname, '..', 'data', 'uploads'),
 

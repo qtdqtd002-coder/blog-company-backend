@@ -37,12 +37,13 @@ async function sendOne(subscription, payloadObj) {
 
 /* 전체 구독자에게 브로드캐스트. store 를 받아 만료 구독은 정리한다.
    payloadObj 예: { title, body, url, tag } — sw.js push 핸들러가 그대로 사용. */
-async function broadcast(store, payloadObj) {
+async function broadcast(store, payloadObj, filter) {
   if (!enabled) {
     console.warn('[push] broadcast skip: 푸시 비활성화 상태.');
     return { sent: 0, failed: 0, removed: 0, skipped: true };
   }
-  const subs = store.subscriptions.all();
+  // filter(sub) → true 인 구독만(2026-11-23 · 계정 범위 알림). 없으면 전원(옛 동작).
+  const subs = store.subscriptions.all().filter((s) => (typeof filter === 'function' ? filter(s) : true));
   let sent = 0, failed = 0, removed = 0;
   for (const s of subs) {
     const r = await sendOne(s.subscription, payloadObj);
