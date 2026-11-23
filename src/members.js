@@ -206,6 +206,7 @@ function create(store) {
     const ok = !!(who && RANK[who.role] >= RANK[need]);
     if (ok) return next();
     if (!rule.strict && !enforceOn()) { note(req, need, who); req.observed = true; return next(); }
+    note(req, need, who);   /* 강제 모드에서 막은 것도 센다 — 하루 한 번 도는 PC 작업이 토큰 없이 불러 막히면 여기서 보인다(11-24) */
     if (!who) return res.status(401).json({ error: '로그인이 필요합니다.', code: 'login' });
     return res.status(403).json({ error: '이 기능을 쓸 권한이 없습니다.', code: 'role', need });
   }
