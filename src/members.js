@@ -178,7 +178,11 @@ function create(store) {
 
   /* 관찰 기록 — 메모리(재시작하면 비워진다). 켜기 전 «아직 토큰 없이 부르는 곳»을 찾는 용도라 영속할 필요가 없다. */
   const audit = new Map();
+  /* ★실제 API 경로만 센다(2026-11-24) — 인터넷 스캐너가 찔러 본 없는 경로(/.env·/wp-login…)가 300칸을 채워
+     진짜 호출처가 기록되지 못했다(첫 관찰 17시간 실측: 300칸 중 실제 경로 4줄). */
+  const API_PATH = /^\/(requests|pins|watch|hidden|mpub|why|topic|push|cal|maintenance)(\/|$)/;
   function note(req, need, who) {
+    if (!API_PATH.test(req.path)) return;
     const pat = req.path.replace(/\/req_[a-z0-9_]+/g, '/:id').replace(/\/(attachments)\/\d+/, '/$1/:n').slice(0, 80);
     const key = need + '|' + req.method + ' ' + pat + '|' + (who ? who.role : '-');
     let a = audit.get(key);
