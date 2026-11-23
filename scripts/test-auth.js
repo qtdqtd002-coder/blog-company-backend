@@ -121,6 +121,15 @@ function chk(name, ok, got) {
     r = await call('GET', '/auth/admin/audit', undefined, T(BOSS));
     chk('관찰 기록에 비로그인 /requests 가 남는다', r.j.rows.some((x) => x.path === '/requests' && x.as === null), r);
 
+    r = await call('GET', '/auth/admin/users');
+    chk('★관찰 모드에서도 관리자 회원 목록은 비로그인 401', r.s === 401, r);
+    r = await call('GET', '/cal/c/bomding');
+    chk('★관찰 모드에서도 달력 열람(단가)은 비로그인 401', r.s === 401, r);
+    r = await call('GET', '/cal/list', undefined, T(BOBBY));
+    chk('★관찰 모드에서도 회원은 달력 목록 403', r.s === 403, r);
+    r = await call('GET', '/cal/me');
+    chk('★관찰 모드에서도 /cal/me 비로그인 401', r.s === 401, r);
+
     /* ── 강제 모드 ── */
     r = await call('POST', '/auth/admin/enforce', { on: true }, T(BOSS));
     chk('강제 켜기는 관리자 «토큰» 전용', r.s === 401, r);

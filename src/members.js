@@ -79,15 +79,19 @@ const clean = (v, max) => String(v == null ? '' : v).replace(/\s+/g, ' ').trim()
 
 /* 역할 표 — 위에서부터 처음 맞는 줄. 표에 없는 경로는 admin(닫힌 쪽이 기본).
    level: open(누구나) · member(로그인) · writer · admin.
+   4번째 칸 true = «항상 강제» — 2026-11-23 새로 만든 경로라 옛 호출처가 없다. 관찰 모드에서도 막는다.
+     ★왜: 첫 배포 직후 실측에서 관찰 모드가 새 관리자 경로까지 열어 /cal/c/bomding(단가)이 비로그인 200 이었다.
+       관찰 모드는 «옛 호출처를 끊지 않으려는» 장치라, 옛 호출처가 없는 경로에는 쓸 이유가 없다.
    ★writer 경로라도 «자기 작성자 범위»는 라우트가 따로 본다(routes.js relAllowed·요청 필터). 이 표는 문 앞 검사다. */
 const POLICY = [
   ['GET', /^\/health$/, 'open'],
   ['GET', /^\/maintenance$/, 'open'],
   ['*', /^\/auth\/(signup|login|logout|me)$/, 'open'],
-  ['POST', /^\/auth\/password$/, 'member'],
-  ['*', /^\/auth\/admin(\/|$)/, 'admin'],
+  ['POST', /^\/auth\/password$/, 'member', true],
+  ['*', /^\/auth\/admin(\/|$)/, 'admin', true],
   ['GET', /^\/cal\/auth$/, 'open'],
-  ['*', /^\/cal\/me(\/|$)/, 'member'],
+  ['*', /^\/cal\/me(\/|$)/, 'member', true],
+  ['GET', /^\/cal\/(list|c\/[^/]+)$/, 'admin', true],
   ['*', /^\/cal(\/|$)/, 'admin'],                       // 옛 공용 달력(/cal/bomding …)·관리자 열람
   ['GET', /^\/requests$/, 'member'],                    // member 는 빈 목록(발주 없음) — 라우트가 거른다
   ['POST', /^\/requests$/, 'writer'],
@@ -98,13 +102,14 @@ const POLICY = [
   ['POST', /^\/(hidden|mpub|why|topic)(\/[a-z]+)?$/, 'writer'],
   ['POST', /^\/push\/(subscribe|unsubscribe)$/, 'member'],
 ];
-function levelOf(method, p) {
+function ruleOf(method, p) {
   const m = method === 'HEAD' ? 'GET' : method;
-  for (const [pm, re, lv] of POLICY) {
-    if ((pm === '*' || pm === m) && re.test(p)) return lv;
+  for (const [pm, re, lv, strict] of POLICY) {
+    if ((pm === '*' || pm === m) && re.test(p)) return { level: lv, strict: !!strict };
   }
-  return 'admin';
+  return { level: 'admin', strict: false };
 }
+const levelOf = (method, p) => ruleOf(method, p).level;
 
 function readCookie(req, name) {
   const raw = req.headers && req.headers.cookie;
@@ -190,11 +195,12 @@ function create(store) {
   function gate(req, res, next) {
     const who = whoOf(req);
     req.who = who;
-    const need = levelOf(req.method, req.path);
+    const rule = ruleOf(req.method, req.path);
+    const need = rule.level;
     if (need === 'open') return next();
     const ok = !!(who && RANK[who.role] >= RANK[need]);
     if (ok) return next();
-    if (!enforceOn()) { note(req, need, who); req.observed = true; return next(); }
+    if (!rule.strict && !enforceOn()) { note(req, need, who); req.observed = true; return next(); }
     if (!who) return res.status(401).json({ error: '로그인이 필요합니다.', code: 'login' });
     return res.status(403).json({ error: '이 기능을 쓸 권한이 없습니다.', code: 'role', need });
   }
