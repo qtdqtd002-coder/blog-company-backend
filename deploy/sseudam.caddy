@@ -1,0 +1,37 @@
+# 쓰담 사이트 — 로그인 뒤 정적 사이트 + 같은 출처 API (드롭인 · 2026-11-24 3단계)
+# 설치 위치: /etc/caddy/conf.d/sseudam.caddy (Caddyfile 의 import 로 읽힌다 · https.sh 가 덮어쓰지 않는다)
+# 정본: blog-company-backend/deploy/sseudam.caddy — 고치면 VM 에 다시 복사하고 `sudo systemctl reload caddy`.
+# 판정 규칙(누가 무엇을 받나)의 정본 = src/site.js 머리 주석. 이 파일은 «길만» 낸다.
+sseudam.34.139.184.70.sslip.io {
+	encode zstd gzip
+
+	header {
+		-Server
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Robots-Tag "noindex, nofollow, noarchive"
+	}
+
+	# API — 사이트는 같은 출처 /api 로 부른다(로그인 쿠키 sd_auth 가 그대로 실린다). 접두사를 떼고 넘긴다.
+	handle_path /api/* {
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# 계정 범위 데이터 — 정적 파일 대신 백엔드가 계정에 맞게 걸러 준다(src/site.js FILTERS 와 같은 목록)
+	@scoped path /posts.json /manifest.json /published.json /reopen.json /_trend/_usage.json /_trend/_quota.json /_trend/_desk-mix.json /_trend/_citations.json /_trend/_refresh.json /_trend/_kpi.json /_trend/_hero.json /_trend/_game-cats.json /_trend/_pin-suggest.json
+	handle @scoped {
+		rewrite * /site-data{path}
+		reverse_proxy 127.0.0.1:8080
+	}
+
+	# 나머지 정적 파일 — 문지기(/auth/gate) 통과분만. 원 요청의 쿠키·머리가 그대로 문지기에 간다.
+	handle {
+		forward_auth 127.0.0.1:8080 {
+			uri /auth/gate
+		}
+		@fresh path / *.html *.json *.js *.css *.webmanifest
+		header @fresh Cache-Control "no-cache"
+		root * /srv/sseudam
+		file_server
+	}
+}

@@ -87,6 +87,8 @@ const POLICY = [
   ['GET', /^\/health$/, 'open'],
   ['GET', /^\/maintenance$/, 'open'],
   ['*', /^\/auth\/(signup|login|logout|me)$/, 'open'],
+  ['GET', /^\/auth\/gate$/, 'open'],                   // 사이트 문지기 — 판정은 site.js 가 직접(2026-11-24)
+  ['GET', /^\/site-data\//, 'open'],                   // 계정 범위 데이터 — 로그인 검사는 site.js 가 직접
   ['POST', /^\/auth\/password$/, 'member', true],
   ['*', /^\/auth\/admin(\/|$)/, 'admin', true],
   ['GET', /^\/cal\/auth$/, 'open'],

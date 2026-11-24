@@ -1,0 +1,9 @@
+# 쓰담 사이트 사본 동기화 — /etc/systemd/system/ 에 복사(정본 = blog-company-backend/deploy/)
+[Unit]
+Description=sseudam site mirror sync (BlogPreview -> /srv/sseudam)
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=qtdqtd9516
+ExecStart=/bin/bash /home/qtdqtd9516/blog-company-backend/deploy/site-sync.sh

@@ -36,6 +36,8 @@ const config = {
   authEnforce: bool(process.env.AUTH_ENFORCE, false),
   // 로그인 쿠키(sd_auth)에 Secure 를 붙인다 — 운영은 HTTPS(Caddy) 뒤라 기본 켬. 로컬 http 시험만 false.
   cookieSecure: bool(process.env.COOKIE_SECURE, true),
+  // 쓰담 사이트 정적 파일 위치(VM 의 저장소 사본 · 2026-11-24 3단계). /auth/gate·/site-data 가 읽는다.
+  siteRoot: process.env.SITE_ROOT || '/srv/sseudam',
 
   dataDir: path.join(__dirname, '..', 'data'),
   uploadDir: path.join(__dirname, '..', 'data', 'uploads'),

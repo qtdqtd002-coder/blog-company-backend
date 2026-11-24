@@ -16,10 +16,12 @@ $gc = "$env:LOCALAPPDATA\Google\Cloud SDK\google-cloud-sdk\bin\gcloud.ps1"
 $INSTANCE = 'blog-backend'
 $ZONE = 'us-east1-c'
 $SSH_USER = 'qtdqtd9516'
-$DEPLOY_URL = 'https://qtdqtd002-coder.github.io/bomding-blog-preview/deploy.sh'
+# ★2026-11-24: 예전엔 GitHub Pages 에 올린 deploy.sh 를 curl 로 받아 돌렸다(BlogPreview/deploy.sh).
+#   3단계(사이트 VM 이전·BlogPreview 비공개)로 Pages 를 끄므로, VM 사본(~/blog-company-backend)의 deploy.sh 를 직접 돈다
+#   (git pull → npm install → pm2 재시작 → health). 첫 설치(clone)는 README §2 그대로.
 
 Write-Host "▶ VM 배포 시작: $SSH_USER@$INSTANCE ($ZONE)" -ForegroundColor Cyan
-& $gc compute ssh "$SSH_USER@$INSTANCE" --zone $ZONE --quiet --command "curl -fsSL $DEPLOY_URL | bash"
+& $gc compute ssh "$SSH_USER@$INSTANCE" --zone $ZONE --quiet --command "cd ~/blog-company-backend && bash deploy.sh"
 
 Write-Host "`n▶ 회수 크론 등록 확인" -ForegroundColor Cyan
 & $gc compute ssh "$SSH_USER@$INSTANCE" --zone $ZONE --quiet --command "pm2 logs blog-company-backend --lines 40 --nostream | grep -i reclaim | tail -2"

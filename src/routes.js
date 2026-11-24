@@ -35,6 +35,7 @@ const runner = require('./agent/runner');
 const reclaim = require('./reclaim');
 const cal = require('./cal');
 const members = require('./members');
+const site = require('./site');
 
 function genId(prefix) {
   // 시간순 정렬 가능한 짧은 ID (crypto 난수 6바이트)
@@ -128,6 +129,8 @@ function buildRouter(store) {
   const mem = members.create(store);
   r.use(mem.gate);
   mem.attach(r, { requireAdmin, writers: ACCOUNT_WRITERS });
+  // 사이트 정적 파일 문지기(2026-11-24 · 3단계) — Caddy forward_auth(/auth/gate) + 계정 범위 데이터(/site-data/*). 정본 = src/site.js 머리 주석
+  r.use(site.create({ whoOf: mem.whoOf, root: config.siteRoot }));
 
   /* 요청자의 데이터 범위: null = 전부(관리자 · 관찰 모드의 비로그인 = 옛 동작 유지) · '작성자 이름' = 그 작성자만 · '' = 없음(일반 회원) */
   function scopeOf(req) {
