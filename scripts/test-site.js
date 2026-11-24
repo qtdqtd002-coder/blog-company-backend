@@ -105,6 +105,11 @@ function chk(name, ok, got) {
     const ck = (lg.h.get('set-cookie') || '').split(';')[0];
     r = await gate('/봄딩/애니모/주제/봄딩_미리보기_a.html', { Cookie: ck }); chk('★쿠키만으로 통과(forward_auth 가 원 요청 쿠키를 싣는다)', ck.startsWith('sd_auth=') && r.s === 204, [ck.slice(0, 12), r.s]);
 
+    r = await call('GET', '/auth/me', undefined, BD);
+    chk('★/auth/me(토큰 머리) = 쿠키를 다시 심는다(쿠키만 만료되는 틈 방지)', /^sd_auth=[^;]+;.*Max-Age=\d+/.test(r.h.get('set-cookie') || ''), (r.h.get('set-cookie') || '').slice(0, 20));
+    r = await call('GET', '/auth/me', undefined, ADM);
+    chk('/auth/me(관리자 토큰) = 쿠키 안 심는다', !r.h.get('set-cookie'), r.h.get('set-cookie'));
+
     /* ── /site-data ── */
     r = await call('GET', '/site-data/posts.json'); chk('범위 데이터 비로그인 = 401', r.s === 401, r.s);
     r = await call('GET', '/site-data/posts.json', undefined, ADM); chk('관리자 posts = 원본 3행', r.s === 200 && r.j.length === 3, r.j);

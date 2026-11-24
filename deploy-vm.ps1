@@ -21,7 +21,7 @@ $SSH_USER = 'qtdqtd9516'
 #   (git pull → npm install → pm2 재시작 → health). 첫 설치(clone)는 README §2 그대로.
 
 Write-Host "▶ VM 배포 시작: $SSH_USER@$INSTANCE ($ZONE)" -ForegroundColor Cyan
-& $gc compute ssh "$SSH_USER@$INSTANCE" --zone $ZONE --quiet --command "cd ~/blog-company-backend && bash deploy.sh"
+& $gc compute ssh "$SSH_USER@$INSTANCE" --zone $ZONE --quiet --command "cd ~/blog-company-backend && bash deploy.sh 2>&1 | sed -E 's/[0-9a-f]{32,}/<hidden>/g'"
 
 Write-Host "`n▶ 회수 크론 등록 확인" -ForegroundColor Cyan
 & $gc compute ssh "$SSH_USER@$INSTANCE" --zone $ZONE --quiet --command "pm2 logs blog-company-backend --lines 40 --nostream | grep -i reclaim | tail -2"

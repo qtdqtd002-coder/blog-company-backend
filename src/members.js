@@ -342,6 +342,12 @@ function create(store) {
     r.get('/auth/me', (req, res) => {
       const w = req.who;
       const user = !w ? null : (w.via === 'token' ? { id: w.id, nick: w.nick, role: 'admin', writer: null, status: 'active' } : pub(userById(w.id)));
+      /* ★2026-11-24 3단계: 사이트 정적 파일은 쿠키(sd_auth)로만 지킨다. 쿠키 Max-Age 는 로그인 때 한 번 정해져
+         «토큰은 살아 있는데 쿠키만 만료»가 생긴다 → 사이트가 부팅마다 부르는 여기서 살아 있는 토큰으로 쿠키를 갈아 준다 */
+      if (w && w.via === 'user') {
+        const tok = req.get('X-Auth-Token') || readCookie(req, COOKIE);
+        if (tok) setCookie(res, tok);
+      }
       res.json({ user, enforce: enforceOn(), writers });
     });
 

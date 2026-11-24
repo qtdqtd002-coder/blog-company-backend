@@ -232,5 +232,5 @@ window.BC_CONFIG = {
 - 길(`deploy/sseudam.caddy` → `/etc/caddy/conf.d/`): `/api/*` = 이 백엔드(같은 출처 · 쿠키 `sd_auth`) · 계정 범위 데이터 13종 = `/site-data/*`(백엔드가 거른다) · 나머지 = `forward_auth /auth/gate` 통과분만.
 - 판정 규칙 정본 = `src/site.js` 머리 주석. 요지: 첫 화면·라이브러리·**글 사진은 열림**(네이버 편집기가 붙여넣은 사진을 서버에서 받아 간다) · 트렌드·도구함·달력 코드 = 로그인 · 작성자 폴더 글 = 관리자와 그 작성자만 · 나머지 = 관리자만(다른 계정엔 404).
 - 동기화: `deploy/site-sync.sh` 를 systemd 타이머(`sseudam-site-sync.timer`, 1분)가 돈다 — 읽기 전용 배포 키 `~/.ssh/sseudam_site_deploy` 로 `git fetch --depth 1` → `reset --hard`. 로그 `~/logs/site-sync.log`.
-- 시험: `npm run test:site`(49항목 · 임시 사이트 폴더 · 운영 데이터 무관).
+- 시험: `npm run test:site`(51항목 · 임시 사이트 폴더 · 운영 데이터 무관).
 - VM 재배포는 `deploy-vm.ps1` 이 VM 사본의 `deploy.sh` 를 직접 돈다(Pages 의 deploy.sh curl 폐지).
